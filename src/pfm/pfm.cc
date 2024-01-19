@@ -15,11 +15,30 @@ namespace PeterDB {
     PagedFileManager &PagedFileManager::operator=(const PagedFileManager &) = default;
 
     RC PagedFileManager::createFile(const std::string &fileName) {
-        return -1;
+        //Create File pointer
+        FILE* file;
+        if (file = std::fopen(fileName.c_str(), "r")) {      //File already exists
+            std::fclose(file);
+            return -1;
+        } else {                                            //FiLE name doesn't exist
+            //Create file, handle fail
+            if (file = std::fopen(fileName.c_str(), "w")) {
+                std::fclose(file);
+                return 0;
+            } else {
+                return -1;
+            }
+        }
     }
 
     RC PagedFileManager::destroyFile(const std::string &fileName) {
-        return -1;
+        //Delete file, handle fail
+        if (std::remove(fileName.c_str()) != 0) {
+            //Fails to delete file
+            return -1;
+        }
+        //Successfully delete file
+        return 0;
     }
 
     RC PagedFileManager::openFile(const std::string &fileName, FileHandle &fileHandle) {
