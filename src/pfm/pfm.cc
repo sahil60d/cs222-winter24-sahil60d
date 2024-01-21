@@ -48,10 +48,7 @@ namespace PeterDB {
             if (fileHandle.initFileHandle(fileName) == FAILURE) {
                 return FAILURE;
             }
-            //Set counters
-            fileHandle.readPageCounter = 0;
-            fileHandle.writePageCounter = 0;
-            fileHandle.appendPageCounter = 0;
+
             return SUCCESS;
         }
         //File doesn't exist
@@ -72,7 +69,7 @@ namespace PeterDB {
 
     RC FileHandle::readPage(PageNum pageNum, void *data) {
         //Reserve first page for counters
-        //pageNum++;
+        pageNum++;
 
         //Move file pointer to appropriate page
         fseek(fptr, pageNum*PAGE_SIZE, SEEK_SET);
@@ -83,13 +80,17 @@ namespace PeterDB {
         }
 
         readPageCounter++;
+        //updateHidden();
         return SUCCESS;
     }
 
     RC FileHandle::writePage(PageNum pageNum, const void *data) {
         //Reserve first page for counters
-        //pageNum++;
-
+        pageNum++;
+        //Error if pageNum is larger than number of pages
+        if (pageNum > appendPageCounter) {
+            return FAILURE;
+        }
         //Move file pointer to appropriate page
         fseek(fptr, pageNum*PAGE_SIZE, SEEK_SET);
 
@@ -99,6 +100,7 @@ namespace PeterDB {
         }
 
         writePageCounter++;
+        //updateHidden();
         return SUCCESS;
     }
 
@@ -112,6 +114,7 @@ namespace PeterDB {
         }
 
         appendPageCounter++;
+        //updateHidden();
         return SUCCESS;
     }
 
@@ -134,24 +137,53 @@ namespace PeterDB {
     }
 
     RC FileHandle::initFileHandle(const std::string &fileName) {
-            if (fptr) {
-                return FAILURE;
-            }
+        if (fptr) {
+            return FAILURE;
+        }
 
-            fptr = std::fopen(fileName.c_str(), "r+");
+        fptr = std::fopen(fileName.c_str(), "r+");
 
-            //Check for fails: handle in use or file fails to open
-            if (!fptr) {
-                return FAILURE;
-            }
-            return SUCCESS;
+        //Check for fails: handle in use or file fails to open
+        if (!fptr) {
+            return FAILURE;
+        }
+
+        //Create hidden page if doesn't exist and write counters or read and set counters
+        fseek(fptr, 0, SEEK_END);
+        if (ftell(fptr) == 0) {
+            fseek(fptr, 0, SEEK_SET);
+            unsigned counters[PAGE_SIZE/4] = {0,0,0};
+            fwrite(counters, sizeof(int), PAGE_SIZE/4, fptr);
+
+            //Set counters
+            readPageCounter = 0;
+            writePageCounter = 0;
+            appendPageCounter = 0;
+
+        } else {
+            fseek(fptr, 0, SEEK_SET);
+            unsigned counters[PAGE_SIZE/4];
+            fread(counters, sizeof(int), PAGE_SIZE/4, fptr);
+            readPageCounter = counters[0];
+            writePageCounter = counters[1];
+            appendPageCounter = counters[2];
+        }
+        return SUCCESS;
     }
 
     RC FileHandle::closeFileHandle() {
+        updateHidden();
         if (fclose(fptr) != 0) {
             return FAILURE;
         }
         return SUCCESS;
+    }
+
+    //Update the counters in the hidden file
+    void FileHandle::updateHidden() {
+        unsigned counters[PAGE_SIZE/4] = {readPageCounter, writePageCounter, appendPageCounter};
+        fseek(fptr, 0, SEEK_SET);
+        fwrite(counters, sizeof(int), PAGE_SIZE/4, fptr);
     }
 
 } // namespace PeterDB

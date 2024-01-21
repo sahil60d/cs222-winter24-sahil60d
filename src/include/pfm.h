@@ -51,6 +51,7 @@ namespace PeterDB {
         RC checkFptr();                                                     //Check if file handler is in use
         RC initFileHandle(const std::string &fileName);                     //Create handle for file
         RC closeFileHandle();                                               //Closes the file pointed at
+        void updateHidden();
 
     private:
         FILE* fptr = nullptr;                                              // File Pointer
