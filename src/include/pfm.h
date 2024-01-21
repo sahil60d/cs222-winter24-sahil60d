@@ -2,8 +2,11 @@
 #define _pfm_h_
 
 #define PAGE_SIZE 4096
+#define SUCCESS 0
+#define FAILURE -1
 
 #include <string>
+#include <unistd.h>
 
 namespace PeterDB {
 
@@ -45,6 +48,12 @@ namespace PeterDB {
         unsigned getNumberOfPages();                                        // Get the number of pages in the file
         RC collectCounterValues(unsigned &readPageCount, unsigned &writePageCount,
                                 unsigned &appendPageCount);                 // Put current counter values into variables
+        RC checkFptr();                                                     //Check if file handler is in use
+        RC initFileHandle(const std::string &fileName);                     //Create handle for file
+        RC closeFileHandle();                                               //Closes the file pointed at
+
+    private:
+        FILE* fptr = nullptr;                                              // File Pointer
     };
 
 } // namespace PeterDB

@@ -19,14 +19,14 @@ namespace PeterDB {
         FILE* file;
         if (file = std::fopen(fileName.c_str(), "r")) {      //File already exists
             std::fclose(file);
-            return -1;
+            return FAILURE;
         } else {                                            //FiLE name doesn't exist
             //Create file, handle fail
             if (file = std::fopen(fileName.c_str(), "w")) {
                 std::fclose(file);
-                return 0;
+                return SUCCESS;
             } else {
-                return -1;
+                return FAILURE;
             }
         }
     }
@@ -35,18 +35,29 @@ namespace PeterDB {
         //Delete file, handle fail
         if (std::remove(fileName.c_str()) != 0) {
             //Fails to delete file
-            return -1;
+            return FAILURE;
         }
         //Successfully delete file
-        return 0;
+        return SUCCESS;
     }
 
     RC PagedFileManager::openFile(const std::string &fileName, FileHandle &fileHandle) {
-        return -1;
+        //Check if file exists
+        if (access(fileName.c_str(), F_OK) == 0) {
+            if (fileHandle.initFileHandle(fileName) == FAILURE) {
+                return FAILURE;
+            }
+            fileHandle.readPageCounter = 0;
+            fileHandle.writePageCounter = 0;
+            fileHandle.appendPageCounter = 0;
+            return SUCCESS;
+        }
+        //File doesn't exist
+        return FAILURE;
     }
 
     RC PagedFileManager::closeFile(FileHandle &fileHandle) {
-        return -1;
+        return fileHandle.closeFileHandle();
     }
 
     FileHandle::FileHandle() {
@@ -75,6 +86,34 @@ namespace PeterDB {
 
     RC FileHandle::collectCounterValues(unsigned &readPageCount, unsigned &writePageCount, unsigned &appendPageCount) {
         return -1;
+    }
+
+    RC FileHandle::checkFptr() {
+        if (!fptr) {
+            return SUCCESS;
+        }
+        return FAILURE;
+    }
+
+    RC FileHandle::initFileHandle(const std::string &fileName) {
+            if (fptr) {
+                return FAILURE;
+            }
+
+            fptr = std::fopen(fileName.c_str(), "r+");
+
+            //Check for fails: handle in use or file fails to open
+            if (!fptr) {
+                return FAILURE;
+            }
+            return SUCCESS;
+    }
+
+    RC FileHandle::closeFileHandle() {
+        if (fclose(fptr) != 0) {
+            return FAILURE;
+        }
+        return SUCCESS;
     }
 
 } // namespace PeterDB
