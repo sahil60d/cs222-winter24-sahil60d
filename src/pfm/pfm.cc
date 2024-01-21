@@ -44,9 +44,11 @@ namespace PeterDB {
     RC PagedFileManager::openFile(const std::string &fileName, FileHandle &fileHandle) {
         //Check if file exists
         if (access(fileName.c_str(), F_OK) == 0) {
+            //link handle to file
             if (fileHandle.initFileHandle(fileName) == FAILURE) {
                 return FAILURE;
             }
+            //Set counters
             fileHandle.readPageCounter = 0;
             fileHandle.writePageCounter = 0;
             fileHandle.appendPageCounter = 0;
@@ -69,23 +71,59 @@ namespace PeterDB {
     FileHandle::~FileHandle() = default;
 
     RC FileHandle::readPage(PageNum pageNum, void *data) {
-        return -1;
+        //Reserve first page for counters
+        //pageNum++;
+
+        //Move file pointer to appropriate page
+        fseek(fptr, pageNum*PAGE_SIZE, SEEK_SET);
+
+        //Read page into data buffer; handle error
+        if (fread(data, 1, PAGE_SIZE, fptr) != PAGE_SIZE) {
+            return FAILURE;
+        }
+
+        readPageCounter++;
+        return SUCCESS;
     }
 
     RC FileHandle::writePage(PageNum pageNum, const void *data) {
-        return -1;
+        //Reserve first page for counters
+        //pageNum++;
+
+        //Move file pointer to appropriate page
+        fseek(fptr, pageNum*PAGE_SIZE, SEEK_SET);
+
+        //Write data into page; handle error if page doesn't exist
+        if (fwrite(data, 1, PAGE_SIZE, fptr) != PAGE_SIZE) {
+            return FAILURE;
+        }
+
+        writePageCounter++;
+        return SUCCESS;
     }
 
     RC FileHandle::appendPage(const void *data) {
-        return -1;
+        //Move file pointer to end of file
+        fseek(fptr, 0, SEEK_END);
+
+        //Write data; handle error
+        if (fwrite(data, 1, PAGE_SIZE, fptr) != PAGE_SIZE) {
+            return FAILURE;
+        }
+
+        appendPageCounter++;
+        return SUCCESS;
     }
 
     unsigned FileHandle::getNumberOfPages() {
-        return -1;
+        return appendPageCounter;
     }
 
     RC FileHandle::collectCounterValues(unsigned &readPageCount, unsigned &writePageCount, unsigned &appendPageCount) {
-        return -1;
+        readPageCount = readPageCounter;
+        writePageCount = writePageCounter;
+        appendPageCount = appendPageCounter;
+        return SUCCESS;
     }
 
     RC FileHandle::checkFptr() {
