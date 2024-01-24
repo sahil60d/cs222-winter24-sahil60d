@@ -2,6 +2,9 @@
 #define _rbfm_h_
 
 #include <vector>
+#include <cmath>
+#include <cstring>
+#include <fstream>
 
 #include "pfm.h"
 
@@ -24,6 +27,16 @@ namespace PeterDB {
         AttrType type;     // attribute type
         AttrLength length; // attribute length
     } Attribute;
+
+    typedef struct {
+        int offset;         //offset of record in page
+        int length;         //length of record
+    } Slot;
+
+    typedef struct {
+        int freeSpaceOffset;     //offset where free space begins
+        int numSlots;            //numbers of slots in page
+    } PageInfo;
 
     // Comparison Operator (NOT needed for part 1 of the project)
     typedef enum {
@@ -97,6 +110,15 @@ namespace PeterDB {
         RC insertRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor, const void *data,
                         RID &rid);
 
+        // Find a page with enough free space
+        PageNum findPage(FileHandle &fileHandle, int size);
+
+        // Create new page if no space exists
+        PageNum newPage(FileHandle &fileHandle);
+
+        //Check bit in sequence of bytes
+        bool checkBit(char* bytes, int size, int index);
+
         // Read a record identified by the given rid.
         RC
         readRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor, const RID &rid, void *data);
@@ -139,6 +161,8 @@ namespace PeterDB {
         RecordBasedFileManager(const RecordBasedFileManager &);                     // Prevent construction by copying
         RecordBasedFileManager &operator=(const RecordBasedFileManager &);          // Prevent assignment
 
+    private:
+        PagedFileManager *pfm;
     };
 
 } // namespace PeterDB

@@ -79,6 +79,7 @@ namespace PeterDBTesting {
 
         std::ostringstream stream;
         rbfm.printRecord(recordDescriptor, inBuffer, stream);
+        //std::cout << stream.str() << std::endl;
         ASSERT_NO_FATAL_FAILURE(
                 checkPrintRecord("EmpName: Anteater, Age: NULL, Height: 177.8, Salary: NULL", stream.str()));
 
