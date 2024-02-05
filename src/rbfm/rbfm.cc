@@ -46,7 +46,7 @@ namespace PeterDB {
         dataSize += nbytes;
 
         void* b = malloc(nbytes);
-        memcpy(b, &data, nbytes);
+        memcpy(b, data, nbytes);
         //calc size of data
         for(int i = 0; i < recordDescriptor.size(); i++) {
             if (checkBit((char*)b, nbytes, i) == true) {
@@ -66,7 +66,9 @@ namespace PeterDB {
 
         //insert data into page
         void* pageBuffer = malloc(PAGE_SIZE);                                           //read page to buffer
-        fileHandle.readPage(pageNum, pageBuffer);
+        if (fileHandle.readPage(pageNum-1, pageBuffer) == FAILURE) {
+            return FAILURE;
+        }
 
         char* filePtr = (char*)pageBuffer;                                                  //Create file pointer
         char* tempPageInfo = filePtr + (PAGE_SIZE - sizeof(PageInfo));                      //Create pageInfo pointer
@@ -122,6 +124,7 @@ namespace PeterDB {
 
         void* dest = malloc(nbytes);
         memcpy(dest, data, nbytes);
+        char nullin = *(char*)dest;
         char* dataPtr = (char*)data;
         dataPtr += (int)nbytes;
         for(int i = 0; i < recordDescriptor.size(); i++) {
@@ -134,6 +137,12 @@ namespace PeterDB {
                 continue;
             }
 
+            /*
+            if ((nullin & ((1<<(7-i)))) != 0) {if ((nullin & ((1<<(7-i)))) != 0) {
+                out << recordDescriptor[i].name << ": NULL";
+                continue;
+            }
+            */
             unsigned int l;
             switch(recordDescriptor[i].type) {
                 case TypeInt:
@@ -186,7 +195,7 @@ namespace PeterDB {
         }
         //Check current page
         void* pageBuffer = malloc(PAGE_SIZE);
-        fileHandle.readPage(pageNum, pageBuffer);
+        fileHandle.readPage(pageNum-1, pageBuffer);
         //Find free space
         char* tempPtr = (char*)pageBuffer + (PAGE_SIZE - sizeof(PageInfo));
         PageInfo* pageInfo = (PageInfo*)tempPtr;
@@ -197,15 +206,15 @@ namespace PeterDB {
             free(pageBuffer);
             return pageNum;
         } else {                    //Look through directory
-            for(int i = 1; i <= fileHandle.getNumberOfPages()-1; i++) {
+            for(unsigned i = 0; i <= fileHandle.getNumberOfPages()-1; i++) {
                 void* pageBuffer = malloc(PAGE_SIZE);
-                fileHandle.readPage(pageNum, pageBuffer);
+                fileHandle.readPage(i, pageBuffer);
                 char*tempPtr = (char*)pageBuffer + (PAGE_SIZE - sizeof(PageInfo));
-                PageInfo* pageIInfo = (PageInfo*)tempPtr;
-                int availSize = PAGE_SIZE - (pageInfo->freeSpaceOffset + pageInfo->numSlots*sizeof(Slot) + sizeof(Slot));
+                PageInfo* pageInfo = (PageInfo*)tempPtr;
+                int availSize = PAGE_SIZE - (pageInfo->freeSpaceOffset + pageInfo->numSlots*sizeof(Slot) + sizeof(Slot) + sizeof(PageInfo));
                 if (size <= availSize) {
                     free(pageBuffer);
-                    return pageNum;
+                    return i+1;
                 }
             }
             //If no space create new page and return new page number
@@ -218,11 +227,11 @@ namespace PeterDB {
         //Append new page
         void* newPage = malloc(PAGE_SIZE);
         fileHandle.appendPage(newPage);
-        free(newPage);
+        //free(newPage);
 
         //Add slot info to page
-        void* pageBuffer = malloc(PAGE_SIZE);
-        char* slotDirectoryPtr = (char*)pageBuffer;
+        //void* pageBuffer = malloc(PAGE_SIZE);
+        char* slotDirectoryPtr = (char*)newPage;
         //move pointer to appropriate position
         slotDirectoryPtr += PAGE_SIZE - sizeof(PageInfo);
         //Create page info
@@ -233,9 +242,10 @@ namespace PeterDB {
 
         //Write page info to new page
         PageNum pageNum = fileHandle.getNumberOfPages();
-        fileHandle.writePage(pageNum, pageBuffer);
+        fileHandle.writePage(pageNum-1, newPage);
 
-        free(pageBuffer);
+        //free(pageBuffer);
+        free(newPage);
         return pageNum;
     }
 
@@ -244,9 +254,10 @@ namespace PeterDB {
         size_t offset = index%8;
 
         if (byteIndex < size) {
-            return (bytes[byteIndex] & (1 << offset)) != 0;
+            char t = bytes[byteIndex];
+            bool test = (bytes[byteIndex] & (1 << (7-offset))) != 0;
+            return (bytes[byteIndex] & (1 << (7-offset))) != 0;
         }
-
         return false;
     }
 

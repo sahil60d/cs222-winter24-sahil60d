@@ -63,12 +63,14 @@ namespace PeterDB {
         readPageCounter = 0;
         writePageCounter = 0;
         appendPageCounter = 0;
+        //numHidden = 0;
     }
 
     FileHandle::~FileHandle() = default;
 
     RC FileHandle::readPage(PageNum pageNum, void *data) {
         //Reserve first page for counters
+        //pageNum += numHidden;
         pageNum++;
 
         //Move file pointer to appropriate page
@@ -86,7 +88,9 @@ namespace PeterDB {
 
     RC FileHandle::writePage(PageNum pageNum, const void *data) {
         //Reserve first page for counters
+        //pageNum += numHidden;
         pageNum++;
+
         //Error if pageNum is larger than number of pages
         if (pageNum > appendPageCounter) {
             return FAILURE;
@@ -184,6 +188,7 @@ namespace PeterDB {
         unsigned counters[PAGE_SIZE/4] = {readPageCounter, writePageCounter, appendPageCounter};
         fseek(fptr, 0, SEEK_SET);
         fwrite(counters, sizeof(int), PAGE_SIZE/4, fptr);
+        //numHidden++;
     }
 
 } // namespace PeterDB

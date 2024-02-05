@@ -55,6 +55,7 @@ namespace PeterDB {
 
     private:
         FILE* fptr = nullptr;                                              // File Pointer
+        //unsigned numHidden = 0;                                                // Number of hidden pages in file
     };
 
 } // namespace PeterDB
