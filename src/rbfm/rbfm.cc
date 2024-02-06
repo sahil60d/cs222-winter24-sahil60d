@@ -113,6 +113,7 @@ namespace PeterDB {
 
     RC RecordBasedFileManager::deleteRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
                                             const RID &rid) {
+
         return -1;
     }
 
@@ -195,19 +196,23 @@ namespace PeterDB {
         }
         //Check current page
         void* pageBuffer = malloc(PAGE_SIZE);
-        fileHandle.readPage(pageNum-1, pageBuffer);
+        if (fileHandle.readPage(pageNum-1, pageBuffer) == FAILURE) {
+            free(pageBuffer);
+            return FAILURE;
+        }
         //Find free space
         char* tempPtr = (char*)pageBuffer + (PAGE_SIZE - sizeof(PageInfo));
         PageInfo* pageInfo = (PageInfo*)tempPtr;
         int availSize = PAGE_SIZE - (pageInfo->freeSpaceOffset + pageInfo->numSlots*sizeof(Slot) + sizeof(Slot) + sizeof(PageInfo));
-
+        free(pageBuffer);
         if (size <= availSize) {
             //use current page
-            free(pageBuffer);
+            //free(pageBuffer);
             return pageNum;
         } else {                    //Look through directory
+            void* pageBuffer = malloc(PAGE_SIZE);
             for(unsigned i = 0; i <= fileHandle.getNumberOfPages()-1; i++) {
-                void* pageBuffer = malloc(PAGE_SIZE);
+                //void* pageBuffer = malloc(PAGE_SIZE);
                 fileHandle.readPage(i, pageBuffer);
                 char*tempPtr = (char*)pageBuffer + (PAGE_SIZE - sizeof(PageInfo));
                 PageInfo* pageInfo = (PageInfo*)tempPtr;
@@ -227,10 +232,8 @@ namespace PeterDB {
         //Append new page
         void* newPage = malloc(PAGE_SIZE);
         fileHandle.appendPage(newPage);
-        //free(newPage);
 
         //Add slot info to page
-        //void* pageBuffer = malloc(PAGE_SIZE);
         char* slotDirectoryPtr = (char*)newPage;
         //move pointer to appropriate position
         slotDirectoryPtr += PAGE_SIZE - sizeof(PageInfo);
@@ -244,7 +247,6 @@ namespace PeterDB {
         PageNum pageNum = fileHandle.getNumberOfPages();
         fileHandle.writePage(pageNum-1, newPage);
 
-        //free(pageBuffer);
         free(newPage);
         return pageNum;
     }

@@ -82,7 +82,7 @@ namespace PeterDB {
         }
 
         readPageCounter++;
-        //updateHidden();
+        updateHidden();
         return SUCCESS;
     }
 
@@ -104,7 +104,7 @@ namespace PeterDB {
         }
 
         writePageCounter++;
-        //updateHidden();
+        updateHidden();
         return SUCCESS;
     }
 
@@ -118,7 +118,7 @@ namespace PeterDB {
         }
 
         appendPageCounter++;
-        //updateHidden();
+        updateHidden();
         return SUCCESS;
     }
 

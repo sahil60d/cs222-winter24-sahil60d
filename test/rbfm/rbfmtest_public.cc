@@ -200,7 +200,11 @@ namespace PeterDBTesting {
 
         // Insert 2000 records into file
         for (int i = 0; i < numRecords; i++) {
-
+/*
+            if (i == 8600) {
+                char test = 't';
+            }
+*/
             // Test insert Record
             int size = 0;
             memset(inBuffer, 0, 1000);
