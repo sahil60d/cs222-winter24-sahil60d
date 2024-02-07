@@ -38,12 +38,14 @@ namespace PeterDB {
         }
 
         //calc record size
-        int dataSize = 0;
-
+        unsigned dataSize = 0;
+        unsigned dSize = 0;
         //calc num bytes for null indicator
         double numFields = recordDescriptor.size();
         double nbytes = (int)ceil(numFields/8);
         dataSize += nbytes;
+
+        int offsets[(unsigned)numFields];                       // array of offsets for each field in record
 
         void* b = malloc(nbytes);
         memcpy(b, data, nbytes);
@@ -56,10 +58,39 @@ namespace PeterDB {
                 //calc size of vachar
                 unsigned int varcharSize = *(unsigned int*)((char*)data + dataSize);
                 dataSize += varcharSize;
+                dSize += varcharSize;
             }
             //int/real/varchar all size 4
             dataSize += 4;
+            dSize += 4;
+            offsets[i] = dataSize;
         }
+        dataSize += sizeof(unsigned) + (int)(numFields*sizeof(unsigned));
+        /* Create Record Format */
+        // Format == [num Fields] + [null bit indicator] + [field offsets] + [data]
+
+        void* newData = malloc(dataSize);
+        char* newDataPtr = (char*)newData;
+        int* nf = (int*)newDataPtr;
+        *nf = numFields;
+        //*newDataPtr = numFields;
+        newDataPtr += sizeof(unsigned);
+        void* nbi = (void*) newDataPtr;
+        memcpy(nbi, b, nbytes);
+        //(char*)newDataPtr;
+        newDataPtr += (int)nbytes;
+        //(unsigned*)newDataPtr;
+        for (unsigned i = 0; i < numFields; i++) {
+            int* off = (int*)newDataPtr;
+            *off = offsets[i];
+            newDataPtr += sizeof(unsigned);
+        }
+        (void*)newDataPtr;
+        memcpy(newDataPtr, (char*)data + (int)nbytes, dSize);
+
+        /* Create Record Format */
+
+
         free(b);
         //find page with enough space
         PageNum pageNum = findPage(fileHandle, dataSize);
@@ -104,7 +135,7 @@ namespace PeterDB {
         }
 
         filePtr += pageInfo->freeSpaceOffset;                                               //move filePtr to start of free space
-        memcpy(filePtr, data, dataSize);                                        //write record data to page
+        memcpy(filePtr, newData, dataSize);                                        //write record data to page
         //slotDirectory -= sizeof(Slot);                                                      //add slot to page
         slotDirectory->length = dataSize;
         slotDirectory->offset = pageInfo->freeSpaceOffset;
@@ -112,6 +143,7 @@ namespace PeterDB {
 
         //write page into file
         fileHandle.writePage(pageNum-1, pageBuffer);
+        free(newData);
         free(pageBuffer);
         return SUCCESS;
     }
@@ -139,8 +171,24 @@ namespace PeterDB {
             return FAILURE;
         }
 
+        // Read data and reformat
         filePtr += slotDirectory->offset;
-        memcpy(data, filePtr, slotDirectory->length);
+        int recordSize = slotDirectory->length;
+        double numFields = recordDescriptor.size();
+        double nbytes = (int)ceil(numFields/8);
+
+        void* readData = malloc(recordSize);
+        memcpy(readData, filePtr, recordSize);
+        char* readDataPtr = (char*)readData;
+        readDataPtr += sizeof(unsigned);                       // skip number of fields
+        memcpy(data, readDataPtr, nbytes);
+        char* tdata = (char*)data;
+        tdata += (int)nbytes;
+        readDataPtr += (int)nbytes + (int)(numFields*sizeof(unsigned));
+        recordSize -= sizeof(unsigned) + int(nbytes) + (int)(numFields*sizeof(unsigned));
+        memcpy(tdata, readDataPtr, recordSize);
+
+        free(readData);
         free(pageBuffer);
         return SUCCESS;
     }
@@ -262,6 +310,14 @@ namespace PeterDB {
 
     RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
                                             const void *data, const RID &rid) {
+        void* pageBuffer = malloc(PAGE_SIZE);
+        if (fileHandle.readPage(rid.pageNum-1, pageBuffer) == FAILURE) {
+            free(pageBuffer);
+            return FAILURE;
+        }
+
+
+
         return -1;
     }
 

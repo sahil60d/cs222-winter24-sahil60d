@@ -418,11 +418,11 @@ namespace PeterDBTesting {
         // 6. Destroy Two Record-Based File
 
         std::string fileNameLarge = fileName + "_large";
+        //rbfm.destroyFile(fileNameLarge);
         if (!fileExists(fileNameLarge)) {
             // Create a file
             ASSERT_EQ(rbfm.createFile(fileNameLarge), success) << "Creating the file should succeed: " << fileName;
             ASSERT_TRUE(fileExists(fileNameLarge)) << "The file is not found: " << fileName;
-
         }
 
         // Open the file
@@ -455,10 +455,16 @@ namespace PeterDBTesting {
             memset(inBuffer, 0, 3000);
             prepareLargeRecordForTwitterUser((int) recordDescriptor.size(), nullsIndicator, i, inBuffer, size);
 
+            if (i == 999) {
+                int t = 8;
+            }
+
             ASSERT_EQ(rbfm.insertRecord(fileHandle, recordDescriptor, inBuffer, rid), success)
                                         << "Inserting a record should succeed.";
             ASSERT_EQ(rbfm.insertRecord(fileHandleLarge, recordDescriptorLarge, inBuffer, rid), success)
                                         << "Inserting a record should succeed.";
+
+            ASSERT_TRUE(compareFileSizes(fileName, fileNameLarge)) << "Files should be the same size";
 
             if (i % 1000 == 0 && i != 0) {
                 GTEST_LOG_(INFO) << i << "/" << numRecords << " records are inserted.";
