@@ -36,6 +36,7 @@ namespace PeterDB {
     typedef struct {
         int freeSpaceOffset;     //offset where free space begins
         int numSlots;            //numbers of slots in page
+        int emptySlots;          //number of empty slots in page
     } PageInfo;
 
     // Comparison Operator (NOT needed for part 1 of the project)

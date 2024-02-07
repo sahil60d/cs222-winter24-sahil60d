@@ -73,9 +73,35 @@ namespace PeterDB {
         char* filePtr = (char*)pageBuffer;                                                  //Create file pointer
         char* tempPageInfo = filePtr + (PAGE_SIZE - sizeof(PageInfo));                      //Create pageInfo pointer
         PageInfo* pageInfo = (PageInfo*)tempPageInfo;
-        pageInfo->numSlots++;
-        char* tempSdirectory = filePtr + (PAGE_SIZE - sizeof(PageInfo) - pageInfo->numSlots*sizeof(Slot));     //Create slotDirectory pointer
-        Slot* slotDirectory = (Slot*)tempSdirectory;
+
+        Slot* slotDirectory;
+        // look for empty slots
+        if (pageInfo->emptySlots >= 1) {                                                    // reuse a slot
+            unsigned i = 1;
+            char* checkSlotptr = filePtr + (PAGE_SIZE - sizeof(PageInfo) - sizeof(Slot));
+            while (i <= pageInfo->numSlots) {
+                Slot* checkSlot = (Slot*)checkSlotptr;
+                if (checkSlot->offset == -1 && checkSlot->length == -1) {                   // found an empty slot
+                    break;
+                } else {
+                    checkSlotptr -= sizeof(Slot);
+                    i++;
+                }
+            }
+            slotDirectory = (Slot*)checkSlotptr;                                            // use existing slot
+
+            rid.pageNum = pageNum;
+            rid.slotNum = i;
+
+            pageInfo->emptySlots--;                                                         // update number of empty slots in page
+        } else {                                                                            // make a new slot
+            pageInfo->numSlots++;
+            char* tempSdirectory = filePtr + (PAGE_SIZE - sizeof(PageInfo) - pageInfo->numSlots*sizeof(Slot));     //Create slotDirectory pointer
+            slotDirectory = (Slot*)tempSdirectory;
+
+            rid.pageNum = pageNum;
+            rid.slotNum = pageInfo->numSlots;
+        }
 
         filePtr += pageInfo->freeSpaceOffset;                                               //move filePtr to start of free space
         memcpy(filePtr, data, dataSize);                                        //write record data to page
@@ -83,9 +109,6 @@ namespace PeterDB {
         slotDirectory->length = dataSize;
         slotDirectory->offset = pageInfo->freeSpaceOffset;
         pageInfo->freeSpaceOffset += dataSize;                                              //update page info
-
-        rid.pageNum = pageNum;
-        rid.slotNum = pageInfo->numSlots;
 
         //write page into file
         fileHandle.writePage(pageNum-1, pageBuffer);
@@ -103,8 +126,19 @@ namespace PeterDB {
         char* filePtr = (char*)pageBuffer;
         char* temppageinfo = filePtr + (PAGE_SIZE - sizeof(PageInfo));
         PageInfo* pageInfo = (PageInfo*)temppageinfo;
+
+        if (rid.slotNum > pageInfo->numSlots) {
+            return FAILURE;
+        }
+
         char* tempSdirectory = filePtr + (PAGE_SIZE - sizeof(PageInfo) - sizeof(Slot)*rid.slotNum);
         Slot* slotDirectory = (Slot*)tempSdirectory;
+
+        // Slot unused
+        if (slotDirectory->offset == -1 && slotDirectory->length == -1) {
+            return FAILURE;
+        }
+
         filePtr += slotDirectory->offset;
         memcpy(data, filePtr, slotDirectory->length);
         free(pageBuffer);
@@ -113,8 +147,62 @@ namespace PeterDB {
 
     RC RecordBasedFileManager::deleteRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
                                             const RID &rid) {
+        void* pageBuffer = malloc(PAGE_SIZE);
+        if (fileHandle.readPage(rid.pageNum-1, pageBuffer) == FAILURE) {
+            return FAILURE;
+        }
 
-        return -1;
+        char* filePtr = (char*)pageBuffer;
+        char* temppageinfo = filePtr + (PAGE_SIZE - sizeof(PageInfo));
+        PageInfo* pageInfo = (PageInfo*)temppageinfo;                                   // Page info
+
+        char* tempSdir = filePtr + (PAGE_SIZE - sizeof(PageInfo) - sizeof(Slot)*rid.slotNum);
+        Slot* slotDir = (Slot*)tempSdir;                                           // slot directory of deleted record
+
+        // case of first,only or last record
+        if (rid.slotNum == 1 && pageInfo->numSlots == 1) {                             // only record
+            // reset page information
+            //pageInfo->numSlots = 0;
+            pageInfo->freeSpaceOffset = 0;
+        } else if (rid.slotNum == pageInfo->numSlots) {                                // last record
+            // reset page information
+            pageInfo->freeSpaceOffset -= slotDir->length;                              // move free space offset pointer to after previous record
+            //pageInfo->numSlots--;                                                      // removes last slot from directory
+        } else {
+            // get old slot info
+            //char* oldRecord = filePtr + slotDir->offset;                               // record to be deleted
+            char* tempNextSdir = tempSdir - sizeof(Slot);
+            Slot* nextSlotDir = (Slot*) tempNextSdir;                                  // slot directory of next record
+
+            // get size of records to be moved
+            unsigned sizeRecords = pageInfo->freeSpaceOffset - nextSlotDir->offset;
+
+            // get record pointers
+            filePtr += slotDir->offset;                                                 // record to be deleted
+            char* moveRecords = (char*)pageBuffer;                                      // new pointer of record to move
+            moveRecords += nextSlotDir->offset;                                         // records to be moved
+
+            memcpy(filePtr, moveRecords, sizeRecords);                      // move records up
+            pageInfo->freeSpaceOffset -= slotDir->length;                               // move free space offset
+
+            // update record offsets
+            for (int i = rid.slotNum + 1; i <= pageInfo->numSlots; i++) {
+                nextSlotDir = (Slot*) tempNextSdir;
+                nextSlotDir->offset -= slotDir->length;
+                tempNextSdir -= sizeof(Slot);
+            }
+        }
+
+        // update deleted slot
+        slotDir->offset = -1;
+        slotDir->length = -1;
+
+        pageInfo->emptySlots++;                                                     // update number of empty slots in page
+
+        // write page to file
+        fileHandle.writePage(rid.pageNum-1, pageBuffer);
+        free(pageBuffer);
+        return SUCCESS;
     }
 
     RC RecordBasedFileManager::printRecord(const std::vector<Attribute> &recordDescriptor, const void *data,
@@ -241,6 +329,7 @@ namespace PeterDB {
         PageInfo pageInfo;
         pageInfo.freeSpaceOffset = 0;
         pageInfo.numSlots = 0;
+        pageInfo.emptySlots = 0;
         memcpy(slotDirectoryPtr, &pageInfo, sizeof(PageInfo));
 
         //Write page info to new page
