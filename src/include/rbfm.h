@@ -147,10 +147,12 @@ namespace PeterDB {
         unsigned getRecordSize(const std::vector<Attribute> &recordDescriptor, const void *data);
 
         unsigned reformatData(const std::vector<Attribute> &recordDescriptor, const void *inBuffer, const void *outBuffer);
+
         // Read an attribute given its name and the rid.
         RC readAttribute(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor, const RID &rid,
                          const std::string &attributeName, void *data);
-
+        RC readAttributeFromRecord(const std::vector<Attribute> &recordDescriptor, const std::string &attributeName, const void *recordData, void *attributeData);
+        
         // Scan returns an iterator to allow the caller to go through the results one by one.
         RC scan(FileHandle &fileHandle,
                 const std::vector<Attribute> &recordDescriptor,

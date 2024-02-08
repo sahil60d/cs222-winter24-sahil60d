@@ -571,5 +571,8 @@ namespace PeterDB {
         return dataSize;
     }
 
+    RC RecordBasedFileManager::readAttributeFromRecord(const std::vector<Attribute> &recordDescriptor, const std::string &attributeName, const void *recordData, void *attributeData) {
+
+    }
 } // namespace PeterDB
 
