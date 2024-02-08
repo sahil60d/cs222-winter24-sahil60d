@@ -38,60 +38,9 @@ namespace PeterDB {
         }
 
         //calc record size
-        unsigned dataSize = 0;
-        unsigned dSize = 0;
-        //calc num bytes for null indicator
-        double numFields = recordDescriptor.size();
-        double nbytes = (int)ceil(numFields/8);
-        dataSize += nbytes;
+        void* newData = malloc(PAGE_SIZE);
+        unsigned dataSize = reformatData(recordDescriptor, data, newData);
 
-        int offsets[(unsigned)numFields];                       // array of offsets for each field in record
-
-        void* b = malloc(nbytes);
-        memcpy(b, data, nbytes);
-        //calc size of data
-        for(int i = 0; i < recordDescriptor.size(); i++) {
-            if (checkBit((char*)b, nbytes, i) == true) {
-                continue;
-            }
-            if (recordDescriptor[i].type == TypeVarChar) {
-                //calc size of vachar
-                unsigned int varcharSize = *(unsigned int*)((char*)data + dataSize);
-                dataSize += varcharSize;
-                dSize += varcharSize;
-            }
-            //int/real/varchar all size 4
-            dataSize += 4;
-            dSize += 4;
-            offsets[i] = dataSize;
-        }
-        dataSize += sizeof(unsigned) + (int)(numFields*sizeof(unsigned));
-        /* Create Record Format */
-        // Format == [num Fields] + [null bit indicator] + [field offsets] + [data]
-
-        void* newData = malloc(dataSize);
-        char* newDataPtr = (char*)newData;
-        int* nf = (int*)newDataPtr;
-        *nf = numFields;
-        //*newDataPtr = numFields;
-        newDataPtr += sizeof(unsigned);
-        void* nbi = (void*) newDataPtr;
-        memcpy(nbi, b, nbytes);
-        //(char*)newDataPtr;
-        newDataPtr += (int)nbytes;
-        //(unsigned*)newDataPtr;
-        for (unsigned i = 0; i < numFields; i++) {
-            int* off = (int*)newDataPtr;
-            *off = offsets[i];
-            newDataPtr += sizeof(unsigned);
-        }
-        (void*)newDataPtr;
-        memcpy(newDataPtr, (char*)data + (int)nbytes, dSize);
-
-        /* Create Record Format */
-
-
-        free(b);
         //find page with enough space
         PageNum pageNum = findPage(fileHandle, dataSize);
 
@@ -139,6 +88,7 @@ namespace PeterDB {
         //slotDirectory -= sizeof(Slot);                                                      //add slot to page
         slotDirectory->length = dataSize;
         slotDirectory->offset = pageInfo->freeSpaceOffset;
+        slotDirectory->isTomb = false;
         pageInfo->freeSpaceOffset += dataSize;                                              //update page info
 
         //write page into file
@@ -169,6 +119,16 @@ namespace PeterDB {
         // Slot unused
         if (slotDirectory->offset == -1 && slotDirectory->length == -1) {
             return FAILURE;
+        }
+
+        // Slot tombstone
+        if (slotDirectory->isTomb) {
+            //get new rid
+            char* tempRID = filePtr + slotDirectory->offset;
+            const RID tombRID = *((RID*)tempRID);
+            free(pageBuffer);
+            readRecord(fileHandle, recordDescriptor, tombRID, data);
+            return SUCCESS;
         }
 
         // Read data and reformat
@@ -207,6 +167,17 @@ namespace PeterDB {
         char* tempSdir = filePtr + (PAGE_SIZE - sizeof(PageInfo) - sizeof(Slot)*rid.slotNum);
         Slot* slotDir = (Slot*)tempSdir;                                           // slot directory of deleted record
 
+        // Slot tombstone
+        if (slotDir->isTomb) {
+            //get new rid
+            char* tempRID = filePtr + slotDir->offset;
+            const RID tombRID = *((RID*)tempRID);
+            //free(pageBuffer);
+            deleteRecord(fileHandle, recordDescriptor, tombRID);
+
+            //return SUCCESS;
+        }
+
         // case of first,only or last record
         if (rid.slotNum == 1 && pageInfo->numSlots == 1) {                             // only record
             // reset page information
@@ -233,10 +204,15 @@ namespace PeterDB {
             memcpy(filePtr, moveRecords, sizeRecords);                      // move records up
             pageInfo->freeSpaceOffset -= slotDir->length;                               // move free space offset
 
+            tempNextSdir = (char*)pageBuffer;
+            tempNextSdir += PAGE_SIZE - sizeof(PageInfo) + sizeof(Slot);
+            //nextSlotDir = (Slot*)tempNextSdir;
             // update record offsets
-            for (int i = rid.slotNum + 1; i <= pageInfo->numSlots; i++) {
+            for (int i = 1; i <= pageInfo->numSlots; i++) {
                 nextSlotDir = (Slot*) tempNextSdir;
-                nextSlotDir->offset -= slotDir->length;
+                if (nextSlotDir->offset > slotDir->offset) {
+                    nextSlotDir->offset -= slotDir->length;
+                }
                 tempNextSdir -= sizeof(Slot);
             }
         }
@@ -244,6 +220,7 @@ namespace PeterDB {
         // update deleted slot
         slotDir->offset = -1;
         slotDir->length = -1;
+        slotDir->isTomb = false;
 
         pageInfo->emptySlots++;                                                     // update number of empty slots in page
 
@@ -310,15 +287,124 @@ namespace PeterDB {
 
     RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
                                             const void *data, const RID &rid) {
+        // open page
         void* pageBuffer = malloc(PAGE_SIZE);
         if (fileHandle.readPage(rid.pageNum-1, pageBuffer) == FAILURE) {
             free(pageBuffer);
             return FAILURE;
         }
 
+        // get page info
+        char* filePtr = (char*)pageBuffer;
+        char* tempPageInfo = filePtr + (PAGE_SIZE - sizeof(PageInfo));
+        PageInfo* pageInfo = (PageInfo*)tempPageInfo;
 
+        // get slot info
+        char* tempSlotDir = filePtr + (PAGE_SIZE - sizeof(PageInfo) - sizeof(Slot)*rid.slotNum);
+        Slot* slotDir = (Slot*)tempSlotDir;
 
-        return -1;
+        // get available size in page
+        unsigned availSize = PAGE_SIZE - (pageInfo->freeSpaceOffset + pageInfo->numSlots*sizeof(Slot) + sizeof(PageInfo));
+
+        // get size of old data
+        int oldDataSize = slotDir->length;
+
+        // get size of new data and reformat
+        void* newData = malloc(PAGE_SIZE);
+        unsigned newDataSize = reformatData(recordDescriptor, data, newData);
+
+        // Check cases: is smaller, is larger (enough space in page), is larger (not enough space in page), is equal
+        if (oldDataSize > newDataSize) {                                                    // is smaller
+            // write new data in space of old data
+            char* updatePtr = filePtr + slotDir->offset;
+            char* nextPtr = updatePtr + slotDir->length;
+            memcpy((void*)updatePtr, newData, newDataSize);
+
+            // update that slot
+            unsigned sizeRecords = pageInfo->freeSpaceOffset - (slotDir->offset + slotDir->length);
+            slotDir->length = newDataSize;
+
+            // compact page
+            char* newPtr = updatePtr + slotDir->length;
+            memcpy(newPtr, nextPtr, sizeRecords);
+
+            // move free pointer offset and update remain slots
+            pageInfo->freeSpaceOffset -= slotDir->length;
+
+            char* tns = filePtr + (PAGE_SIZE - sizeof(PageInfo) - sizeof(Slot));
+            Slot* nextSlot;
+            for (unsigned i = 1; i <= pageInfo->numSlots; i++) {
+                nextSlot = (Slot*) tns;
+                if (nextSlot->offset > slotDir->offset) {
+                    nextSlot->offset -= slotDir->length;
+                }
+                tns -= sizeof(Slot);
+            }
+
+        } else if (oldDataSize < newDataSize && availSize >= newDataSize-oldDataSize) {     // is larger (enough space in page)
+            unsigned extraSpace = newDataSize-oldDataSize;
+            // move records back
+            char* old = filePtr + slotDir->offset;
+            char* movePtr = old + slotDir->length;
+            char* newPtr = movePtr + extraSpace;
+            unsigned sizeRecords = pageInfo->freeSpaceOffset - (slotDir->offset + slotDir->length);
+            memcpy(newPtr, movePtr, sizeRecords);
+
+            // write new data
+            memcpy((void*)old, newData, newDataSize);
+            slotDir->length = newDataSize;
+
+            // update free space pointer and slots
+            pageInfo->freeSpaceOffset += extraSpace;
+
+            char* tns = filePtr + (PAGE_SIZE - sizeof(PageInfo) - sizeof(Slot));
+            Slot* nextSlot;
+            for (unsigned i = 1; i <= pageInfo->numSlots; i++) {
+                nextSlot = (Slot *) tns;
+                if (nextSlot->offset > slotDir->offset) {
+                    nextSlot->offset += extraSpace;
+                }
+                tns -= sizeof(Slot);
+            }
+        } else if (oldDataSize < newDataSize && availSize < newDataSize-oldDataSize) {      // is larger (not enough space in page)
+            // insert record in new page
+            RID tombRID;
+            insertRecord(fileHandle, recordDescriptor, data, tombRID);
+
+            // compact size
+            char* tomb = filePtr + slotDir->offset;
+            char* movePtr = tomb + slotDir->length;
+            char* newPtr = tomb + sizeof(RID);
+            unsigned sizeRecords = pageInfo->freeSpaceOffset - (slotDir->offset + slotDir->length);
+            memcpy(newPtr, movePtr, sizeRecords);
+
+            // write rid info
+            memcpy(tomb, &tombRID, sizeof(RID));
+
+            // update slot
+            unsigned savedSpace = slotDir->length - sizeof(RID);
+            pageInfo->freeSpaceOffset -= savedSpace;
+            slotDir->length = sizeof(RID);
+            slotDir->isTomb = true;
+
+            char* tns = filePtr + (PAGE_SIZE - sizeof(PageInfo) - sizeof(Slot));
+            Slot* nextSlot;
+            for (unsigned i = 1; i <= pageInfo->numSlots; i++) {
+                nextSlot = (Slot *) tns;
+                if (nextSlot->offset > slotDir->offset) {
+                    nextSlot->offset -= savedSpace;
+                }
+                tns -= sizeof(Slot);
+            }
+        } else {                                                                            // same size
+            char* old = filePtr + slotDir->offset;
+            memcpy(old, newData, newDataSize);
+        }
+
+        // write to page
+        fileHandle.writePage(rid.pageNum-1, pageBuffer);
+        free(pageBuffer);
+        return SUCCESS;
     }
 
     RC RecordBasedFileManager::readAttribute(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
@@ -406,6 +492,83 @@ namespace PeterDB {
             return (bytes[byteIndex] & (1 << (7-offset))) != 0;
         }
         return false;
+    }
+
+    unsigned RecordBasedFileManager::getRecordSize(const std::vector<Attribute> &recordDescriptor, const void *data) {
+        unsigned dataSize = 0;
+        double numFields = recordDescriptor.size();
+        double nbytes = (int)ceil(numFields/8);
+        dataSize += nbytes;
+
+        void* b = malloc(nbytes);
+        memcpy(b, data, nbytes);
+
+        for (unsigned i = 0; i < recordDescriptor.size(); i++) {
+            if (checkBit((char*)b, nbytes, i) == true) {
+                continue;
+            }
+            if (recordDescriptor[i].type == TypeVarChar) {
+                unsigned int varcharSize = *(unsigned int*)((char*)data + dataSize);
+                dataSize += varcharSize;
+            }
+            dataSize += 4;
+        }
+        free(b);
+        return dataSize;
+    }
+
+    unsigned RecordBasedFileManager::reformatData(const std::vector<Attribute> &recordDescriptor, const void *inBuffer, const void *outBuffer) {
+        unsigned dataSize = 0;
+        unsigned dSize = 0;
+        //calc num bytes for null indicator
+        double numFields = recordDescriptor.size();
+        double nbytes = (int)ceil(numFields/8);
+        dataSize += nbytes;
+
+        int offsets[(unsigned)numFields];                       // array of offsets for each field in record
+
+        void* b = malloc(nbytes);
+        memcpy(b, inBuffer, nbytes);
+        //calc size of data
+        for(int i = 0; i < recordDescriptor.size(); i++) {
+            if (checkBit((char*)b, nbytes, i) == true) {
+                continue;
+            }
+            if (recordDescriptor[i].type == TypeVarChar) {
+                //calc size of vachar
+                unsigned int varcharSize = *(unsigned int*)((char*)inBuffer + dataSize);
+                dataSize += varcharSize;
+                dSize += varcharSize;
+            }
+            //int/real/varchar all size 4
+            dataSize += 4;
+            dSize += 4;
+            offsets[i] = dataSize;
+        }
+        dataSize += sizeof(unsigned) + (int)(numFields*sizeof(unsigned));
+        /* Create Record Format */
+        // Format == [num Fields] + [null bit indicator] + [field offsets] + [data]
+
+        //void* newData = malloc(dataSize);
+        char* newDataPtr = (char*)outBuffer;
+        int* nf = (int*)newDataPtr;
+        *nf = numFields;
+        //*newDataPtr = numFields;
+        newDataPtr += sizeof(unsigned);
+        void* nbi = (void*) newDataPtr;
+        memcpy(nbi, b, nbytes);
+        //(char*)newDataPtr;
+        newDataPtr += (int)nbytes;
+        //(unsigned*)newDataPtr;
+        for (unsigned i = 0; i < numFields; i++) {
+            int* off = (int*)newDataPtr;
+            *off = offsets[i];
+            newDataPtr += sizeof(unsigned);
+        }
+        (void*)newDataPtr;
+        memcpy(newDataPtr, (char*)inBuffer + (int)nbytes, dSize);
+        free(b);
+        return dataSize;
     }
 
 } // namespace PeterDB

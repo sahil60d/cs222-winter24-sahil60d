@@ -31,6 +31,7 @@ namespace PeterDB {
     typedef struct {
         int offset;         //offset of record in page
         int length;         //length of record
+        bool isTomb;        //is record a tombstone
     } Slot;
 
     typedef struct {
@@ -143,6 +144,9 @@ namespace PeterDB {
         RC updateRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor, const void *data,
                         const RID &rid);
 
+        unsigned getRecordSize(const std::vector<Attribute> &recordDescriptor, const void *data);
+
+        unsigned reformatData(const std::vector<Attribute> &recordDescriptor, const void *inBuffer, const void *outBuffer);
         // Read an attribute given its name and the rid.
         RC readAttribute(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor, const RID &rid,
                          const std::string &attributeName, void *data);
