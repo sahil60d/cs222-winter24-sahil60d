@@ -418,7 +418,7 @@ namespace PeterDBTesting {
         // 6. Destroy Two Record-Based File
 
         std::string fileNameLarge = fileName + "_large";
-        //rbfm.destroyFile(fileNameLarge);
+        rbfm.destroyFile(fileNameLarge);
         if (!fileExists(fileNameLarge)) {
             // Create a file
             ASSERT_EQ(rbfm.createFile(fileNameLarge), success) << "Creating the file should succeed: " << fileName;

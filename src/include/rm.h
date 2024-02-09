@@ -8,6 +8,7 @@
 
 namespace PeterDB {
 #define RM_EOF (-1)  // end of a scan operator
+#define VARCHAR_SIZE 50
 
     // RM_ScanIterator is an iterator to go through tuples
     class RM_ScanIterator {
@@ -37,6 +38,7 @@ namespace PeterDB {
     class RelationManager {
     public:
         static RelationManager &instance();
+        static unsigned tableCount;
 
         RC createCatalog();
 
@@ -71,6 +73,20 @@ namespace PeterDB {
                 const std::vector<std::string> &attributeNames, // a list of projected attributes
                 RM_ScanIterator &rm_ScanIterator);
 
+        /************Helpers*************/
+        // Get table description: tableId, tableName, fileName
+        RC tableDesc(std::vector<Attribute> &recordDescriptor);
+
+        // Get column description: tableId, columnName, columnType, columnLength, columnPosition
+        RC columnDesc(std::vector<Attribute> &recordDescriptor);
+
+        // Insert tuple into Tables
+        RC insertTables(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor, RID &rid, const std::string &tableName, const std::string &fileName);
+
+        // Insert tuple in Columns
+        RC insertColumns(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor, RID &rid, const std::string &columnName, const int &columnType, const int &columnLength, const int &columnPosition);
+
+        /********************************/
         // Extra credit work (10 points)
         RC addAttribute(const std::string &tableName, const Attribute &attr);
 
@@ -96,6 +112,8 @@ namespace PeterDB {
         RelationManager(const RelationManager &);                           // Prevent construction by copying
         RelationManager &operator=(const RelationManager &);                // Prevent assignment
 
+    private:
+        RecordBasedFileManager *rbfm;
     };
 
 } // namespace PeterDB

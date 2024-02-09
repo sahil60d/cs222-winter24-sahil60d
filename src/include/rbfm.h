@@ -73,6 +73,17 @@ namespace PeterDB {
 
         ~RBFM_ScanIterator() = default;;
 
+        // Add data to this class
+        FileHandle fileHandle;
+        std::vector<Attribute> recordDescriptor;
+        std::string conditionAttribute;
+        int conditionAttributeNum;                  // attribute field
+        AttrType  conditionAttributeType;           // attribute type
+        CompOp compOp;
+        void *value;
+        std::vector<std::string> attributeNames;
+
+
         // Never keep the results in the memory. When getNextRecord() is called,
         // a satisfying record needs to be fetched from the file.
         // "data" follows the same format as RecordBasedFileManager::insertRecord().
@@ -112,7 +123,7 @@ namespace PeterDB {
         RC insertRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor, const void *data,
                         RID &rid);
 
-        // Find a page with enough free space
+        // Find a page with enough free spaceconst std::vector<Attribute> &recordDescriptor
         PageNum findPage(FileHandle &fileHandle, int size);
 
         // Create new page if no space exists
@@ -152,7 +163,7 @@ namespace PeterDB {
         RC readAttribute(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor, const RID &rid,
                          const std::string &attributeName, void *data);
         RC readAttributeFromRecord(const std::vector<Attribute> &recordDescriptor, const std::string &attributeName, const void *recordData, void *attributeData);
-        
+
         // Scan returns an iterator to allow the caller to go through the results one by one.
         RC scan(FileHandle &fileHandle,
                 const std::vector<Attribute> &recordDescriptor,
