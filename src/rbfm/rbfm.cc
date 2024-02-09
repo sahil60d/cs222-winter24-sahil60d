@@ -462,6 +462,10 @@ namespace PeterDB {
             memcpy(rbfm_ScanIterator.value, value, sizeof(int));
         }
 
+        // Set save RID to first slot on first page
+        rbfm_ScanIterator.saveRID.pageNum = 1;
+        rbfm_ScanIterator.saveRID.slotNum = 1;
+
         return SUCCESS;
     }
 
@@ -659,4 +663,48 @@ namespace PeterDB {
         }
         return FAILURE;
     }
+
+
+    RC RBFM_ScanIterator::getRecord(RID &rid, const void* pageBuffer, void* recordData) {
+        RecordBasedFileManager &rbfm = RecordBasedFileManager::instance();
+        rbfm.readRecord(fileHandle, recordDescriptor, rid, recordData);
+
+        /*
+        char* filePtr = (char*) pageBuffer;
+        PageInfo* pageInfo = (PageInfo*)(filePtr + PAGE_SIZE - sizeof(PageInfo));
+        Slot* slotDir = (Slot*)(filePtr + PAGE_SIZE - sizeof(PageInfo) - sizeof(Slot)*rid.slotNum);
+        filePtr += slotDir->offset;
+        memcpy(recordData, (void*)filePtr, slotDir->length); */
+
+        return SUCCESS;
+    }
+
+
+    RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data) {
+        // Read page
+        void* pageBuffer = malloc(PAGE_SIZE);
+        if (fileHandle.readPage(saveRID.pageNum, pageBuffer) == FAILURE) {
+            free(pageBuffer);
+            return FAILURE;
+        }
+
+        char* filePtr = (char*) pageBuffer;
+        PageInfo* pageInfo = (PageInfo*)(filePtr + PAGE_SIZE - sizeof(PageInfo));
+
+        // step through the pages in file
+        while(saveRID.pageNum <= fileHandle.getNumberOfPages()) {
+            // check each record in page
+            if (rid.slotNum <= pageInfo->numSlots) {
+                void* recordData = malloc(PAGE_SIZE);
+
+
+
+            } else {                    // no more slots in this page
+                saveRID.pageNum++;
+                saveRID.slotNum = 0;
+            }
+        }
+
+    }
+
 }

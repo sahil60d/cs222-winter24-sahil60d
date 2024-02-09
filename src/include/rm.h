@@ -9,6 +9,8 @@
 namespace PeterDB {
 #define RM_EOF (-1)  // end of a scan operator
 #define VARCHAR_SIZE 50
+#define TABLES_NAME "Tables"
+#define COLUMNS_NAME "Columns"
 
     // RM_ScanIterator is an iterator to go through tuples
     class RM_ScanIterator {
@@ -38,7 +40,8 @@ namespace PeterDB {
     class RelationManager {
     public:
         static RelationManager &instance();
-        static unsigned tableCount;
+        unsigned tableCount = 0;
+        bool catExists = false;
 
         RC createCatalog();
 
@@ -85,6 +88,9 @@ namespace PeterDB {
 
         // Insert tuple in Columns
         RC insertColumns(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor, RID &rid, const std::string &columnName, const int &columnType, const int &columnLength, const int &columnPosition);
+
+        // Check is table name matchs TABLES/COLUMNS
+        RC checkName(const std::string &tableName);
 
         /********************************/
         // Extra credit work (10 points)
