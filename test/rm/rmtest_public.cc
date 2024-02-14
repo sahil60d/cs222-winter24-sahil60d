@@ -24,8 +24,7 @@ namespace PeterDBTesting {
         for (int i = 1; i < 5; i++) {
             tableName = "rm_test_table_" + std::to_string(i);
 
-            table_attrs = parseDDL(
-                    "CREATE TABLE " + tableName + " (emp_name VARCHAR(40), age INT, height REAL, salary REAL))");
+            table_attrs = parseDDL("CREATE TABLE " + tableName + " (emp_name VARCHAR(40), age INT, height REAL, salary REAL))");
             // Delete the actual file
             remove(tableName.c_str());
             // Create a table

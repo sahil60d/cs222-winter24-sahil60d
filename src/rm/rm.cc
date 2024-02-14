@@ -15,9 +15,8 @@ namespace PeterDB {
     RelationManager &RelationManager::operator=(const RelationManager &) = default;
 
     RC RelationManager::createCatalog() {
-        std::string tables = TABLES_NAME;
-        std::string columns = COLUMNS_NAME;
         // check if files already exist
+
         FILE *file;
         if ((file = std::fopen(tables.c_str(), "r")) || (file = std::fopen(columns.c_str(), "r"))) {
             // exists
@@ -48,11 +47,11 @@ namespace PeterDB {
         tableCount++;
         insertTables(tableFileHandle, tableRecordDescription, tableRID, "Tables", "Tables");
         for (int i = 1; i <= tableRecordDescription.size(); i++) {
-            insertColumns(tableFileHandle, tableRecordDescription, tableRID, tableRecordDescription[i].name, tableRecordDescription[i].type, tableRecordDescription[i].length, i);
+            insertColumns(columnFileHandle, columnRecordDescription, columnRID, tableRecordDescription[i].name, tableRecordDescription[i].type, tableRecordDescription[i].length, i);
         }
 
         tableCount++;
-        insertTables(columnFileHandle, columnRecordDescription, columnRID, "Columns", "Columns");
+        insertTables(tableFileHandle, tableRecordDescription, tableRID, "Columns", "Columns");
         for (int i = 1; i <= columnRecordDescription.size(); i++) {
             insertColumns(columnFileHandle, columnRecordDescription, columnRID, columnRecordDescription[i].name, columnRecordDescription[i].type, columnRecordDescription[i].length, i);
         }
@@ -67,59 +66,221 @@ namespace PeterDB {
     }
 
     RC RelationManager::deleteCatalog() {
-        if (catExists == false) {           // catolog doesn't exist
-            return SUCCESS;
-        }
+        //if (catExists == false) {           // catolog doesn't exist
+        //    return SUCCESS;
+        //}
 
-        RC rc1 = rbfm->destroyFile(TABLES_NAME);
-        RC rc2 = rbfm->destroyFile(COLUMNS_NAME);
+        RC rc1 = rbfm->destroyFile(tables);
+        RC rc2 = rbfm->destroyFile(columns);
         if (rc1 == FAILURE || rc2 == FAILURE) {return FAILURE;}
+        tableCount = 0;
+        catExists = false;
 
         return SUCCESS;
     }
 
     RC RelationManager::createTable(const std::string &tableName, const std::vector<Attribute> &attrs) {
-        // Check if TABLES/COLUMNS
+        // Check if TABLES/COLUMNS or No catalog
+        if (!catExists) {return FAILURE;}
         if (checkName(tableName) == FAILURE) {
             return FAILURE;
         }
 
+        // Create table
+        if (rbfm->createFile(tableName) == FAILURE) {
+            return FAILURE;
+        }
 
+        // Open TABLES/COLUMNS
+        FileHandle tableFileHandle;
+        FileHandle columnFileHandle;
+        RC rc1 = rbfm->openFile(tables, tableFileHandle);
+        RC rc2 = rbfm->openFile(columns, columnFileHandle);
+        if (rc1 == FAILURE || rc2 == FAILURE) {return FAILURE;}
+
+        // Insert TABLES
+        RID tableRID;
+        std::vector<Attribute> tableRecordDescription;
+        tableDesc(tableRecordDescription);
+        tableCount++;
+        insertTables(tableFileHandle, tableRecordDescription, tableRID, tableName, tableName);
+
+        // Insert COLUMNS
+        RID columnRID;
+        std::vector<Attribute> columnRecordDescription;
+        columnDesc(columnRecordDescription);
+        for (int i = 0; i < attrs.size(); i++) {
+            insertColumns(columnFileHandle, columnRecordDescription, columnRID, attrs[i].name, attrs[i].type, attrs[i].length, i+1);
+        }
+
+        // Close files
+        rc1 = rbfm->closeFile(tableFileHandle);
+        rc2 = rbfm->closeFile((columnFileHandle));
+        if (rc1 == FAILURE || rc2 == FAILURE) {return FAILURE;}
 
         return SUCCESS;
     }
 
     RC RelationManager::deleteTable(const std::string &tableName) {
-        return -1;
+        // check name
+        if (checkName(tableName) == FAILURE) {
+            return FAILURE;
+        }
+
+        // delete file
+        if (rbfm->destroyFile(tableName) == FAILURE) {
+            return FAILURE;
+        }
+
+        // format tableName
+        int l = tableName.length();
+        void* value = malloc(l);
+        formatStr(tableName, value);
+
+        // remove from TABLES
+        RM_ScanIterator rmsi_table;
+        std::vector<std::string> attributes;
+        attributes.push_back("table-id");
+        scan(tables, "table-name", EQ_OP, value, attributes, rmsi_table);
+
+        FileHandle tableFileHandle;
+        RID tableRid;
+        void* data = malloc(PAGE_SIZE);
+        std::vector<Attribute> recordDescriptor;
+        tableDesc(recordDescriptor);
+
+        rbfm->openFile(tables, tableFileHandle);
+
+        rmsi_table.getNextTuple(tableRid, data);
+        int tableId = *(int*)data;
+        rbfm->deleteRecord(tableFileHandle, recordDescriptor, tableRid);
+
+        rbfm->closeFile(tableFileHandle);
+        attributes.clear();
+        recordDescriptor.clear();
+
+        // remove from COLUMNS
+        RM_ScanIterator rmsi_column;
+        attributes.push_back("column-name");
+        scan(columns, "table-id", EQ_OP, &tableId, attributes, rmsi_column);
+
+        FileHandle columnFileHandle;
+        RID columnRid;
+        columnDesc(recordDescriptor);
+
+        rbfm->openFile(columns, columnFileHandle);
+
+        while(rmsi_column.getNextTuple(columnRid, data) != RM_EOF) {
+            rbfm->deleteRecord(columnFileHandle, recordDescriptor, columnRid);
+        }
+
+        rbfm->closeFile(columnFileHandle);
+
+        //tableCount--;
+        free(value);
+        return SUCCESS;
     }
 
     RC RelationManager::getAttributes(const std::string &tableName, std::vector<Attribute> &attrs) {
-        return -1;
+        return createDesc(tableName, attrs);
     }
 
     RC RelationManager::insertTuple(const std::string &tableName, const void *data, RID &rid) {
-        return -1;
+        // open file
+        FileHandle fileHandle;
+        if (rbfm->openFile(tableName, fileHandle) == FAILURE) {return FAILURE;}
+
+        // get record description
+        std::vector<Attribute> recordDescription;
+        createDesc(tableName, recordDescription);
+
+        // insert record
+        if (rbfm->insertRecord(fileHandle, recordDescription, data, rid) == FAILURE) {return FAILURE;}
+
+        // close file
+        if (rbfm->closeFile(fileHandle) == FAILURE) {return FAILURE;}
+
+        return SUCCESS;
     }
 
     RC RelationManager::deleteTuple(const std::string &tableName, const RID &rid) {
-        return -1;
+        // open file
+        FileHandle fileHandle;
+        if (rbfm->openFile(tableName, fileHandle) == FAILURE) {return FAILURE;}
+
+        // get record description
+        std::vector<Attribute> recordDescription;
+        createDesc(tableName, recordDescription);
+
+        // delete record
+        if (rbfm->deleteRecord(fileHandle, recordDescription, rid) == FAILURE) {return FAILURE;}
+
+        // close file
+        if (rbfm->closeFile(fileHandle) == FAILURE) {return FAILURE;}
+
+        return SUCCESS;
     }
 
     RC RelationManager::updateTuple(const std::string &tableName, const void *data, const RID &rid) {
-        return -1;
+        // open file
+        FileHandle fileHandle;
+        if (rbfm->openFile(tableName, fileHandle) == FAILURE) {return FAILURE;}
+
+        // get record description
+        std::vector<Attribute> recordDescription;
+        createDesc(tableName, recordDescription);
+
+        // update record
+        if (rbfm->updateRecord(fileHandle, recordDescription, data, rid) == FAILURE) {return FAILURE;}
+
+        // close file
+        if (rbfm->closeFile(fileHandle) == FAILURE) {return FAILURE;}
+
+        return SUCCESS;
     }
 
     RC RelationManager::readTuple(const std::string &tableName, const RID &rid, void *data) {
-        return -1;
+        // open file
+        FileHandle fileHandle;
+        if (rbfm->openFile(tableName, fileHandle) == FAILURE) {return FAILURE;}
+
+        // get record description
+        std::vector<Attribute> recordDescription;
+        createDesc(tableName, recordDescription);
+
+        // read record
+        if (rbfm->readRecord(fileHandle, recordDescription, rid, data) == FAILURE) {return FAILURE;}
+
+        // close file
+        if (rbfm->closeFile(fileHandle) == FAILURE) {return FAILURE;}
+
+        return SUCCESS;
     }
 
     RC RelationManager::printTuple(const std::vector<Attribute> &attrs, const void *data, std::ostream &out) {
-        return -1;
+
+        if (rbfm->printRecord(attrs, data, out) == FAILURE) {return FAILURE;}
+
+        return SUCCESS;
     }
 
     RC RelationManager::readAttribute(const std::string &tableName, const RID &rid, const std::string &attributeName,
                                       void *data) {
-        return -1;
+        // open file
+        FileHandle fileHandle;
+        if (rbfm->openFile(tableName, fileHandle) == FAILURE) {return FAILURE;}
+
+        // get record description
+        std::vector<Attribute> recordDescription;
+        createDesc(tableName, recordDescription);
+
+        // read record
+        if (rbfm->readAttribute(fileHandle, recordDescription, rid, attributeName, data) == FAILURE) {return FAILURE;}
+
+        // close file
+        if (rbfm->closeFile(fileHandle) == FAILURE) {return FAILURE;}
+
+        return SUCCESS;
     }
 
     RC RelationManager::scan(const std::string &tableName,
@@ -128,16 +289,56 @@ namespace PeterDB {
                              const void *value,
                              const std::vector<std::string> &attributeNames,
                              RM_ScanIterator &rm_ScanIterator) {
-        return -1;
+        // get file handle
+        FileHandle fileHandle;
+        if (rbfm->openFile(tableName, fileHandle) == FAILURE) {
+            return FAILURE;
+        }
+
+        std::vector<Attribute> attributes;
+        // get record descriptor
+        if (tableName == tables) {
+            tableDesc(attributes);
+        } else if (tableName == columns) {
+            columnDesc(attributes);
+        } else {
+            // create record description for all other tables
+            createDesc(tableName, attributes);
+        }
+
+        // call rbfm scan
+        RBFM_ScanIterator *_rbfmsi = new RBFM_ScanIterator();
+        if (rbfm->scan(fileHandle, attributes, conditionAttribute, compOp, value, attributeNames, *_rbfmsi) == FAILURE){
+            return FAILURE;
+        }
+
+        rm_ScanIterator.rbfmsi = _rbfmsi;
+
+        // close file
+        //if (rbfm->closeFile(fileHandle) == FAILURE) {
+        //    return FAILURE;
+        //}
+        return SUCCESS;
     }
 
     RM_ScanIterator::RM_ScanIterator() = default;
 
     RM_ScanIterator::~RM_ScanIterator() = default;
 
-    RC RM_ScanIterator::getNextTuple(RID &rid, void *data) { return RM_EOF; }
+    RC RM_ScanIterator::getNextTuple(RID &rid, void *data) {
+        if (rbfmsi->getNextRecord(rid, data) != RBFM_EOF) {
+            return SUCCESS;
+        }
+        return RM_EOF;
+    }
 
-    RC RM_ScanIterator::close() { return -1; }
+    RC RM_ScanIterator::close() {
+        if (rbfmsi != nullptr) {
+            rbfmsi->close();
+            delete rbfmsi;
+        }
+        return SUCCESS;
+    }
 
     /**************Helpers**************/
     RC RelationManager::tableDesc(std::vector<Attribute> &recordDescriptor) {
@@ -207,13 +408,13 @@ namespace PeterDB {
     RC RelationManager::insertTables(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor, RID &rid, const std::string &tableName, const std::string &fileName) {
         int tableNameLen = tableName.length();
         int fileNameLen = fileName.length();
-        int dataSize = sizeof(int)*3 + tableNameLen + fileNameLen;         // get size of data
+        int dataSize = sizeof(char) + sizeof(int)*3 + tableNameLen + fileNameLen;         // get size of data
         void *data = malloc(dataSize);
 
         // store info into data
         int tableId = tableCount;
         int offset = 0;
-        char nullindicator = '0';
+        char nullindicator = 0b00000000;
         memcpy(data, &nullindicator, sizeof(char));
         offset += sizeof(char);
         memcpy((char*)data + offset, &tableId, sizeof(int));
@@ -236,16 +437,16 @@ namespace PeterDB {
 
     RC RelationManager::insertColumns(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor, RID &rid, const std::string &columnName, const int &columnType, const int &columnLength, const int &columnPosition) {
         int columnNameLen = columnName.length();
-        int dataSize = sizeof(int)*5  +columnNameLen;
+        int dataSize = sizeof(char) + sizeof(int)*5 + columnNameLen;
         void *data = malloc(dataSize);
 
         // store info into data
         int tableId = tableCount;
         int offset = 0;
-        char nullindicator = '0';
+        char nullindicator = 0b00000000;
         memcpy(data, &nullindicator, sizeof(char));
         offset += sizeof(char);
-        memcpy((char*)data + offset, &tableCount, sizeof(int));
+        memcpy((char*)data + offset, &tableId, sizeof(int));
         offset += sizeof(int);
         memcpy((char*)data + offset, &columnNameLen, sizeof(int));
         offset += sizeof(int);
@@ -267,9 +468,97 @@ namespace PeterDB {
     }
 
     RC RelationManager::checkName(const std::string &tableName) {
-        if (tableName == TABLES_NAME || tableName == COLUMNS_NAME) {
+        if (tableName == tables || tableName == columns) {
             return FAILURE;
         }
+        return SUCCESS;
+    }
+
+    RC RelationManager::createDesc(const std::string &tableName, std::vector<Attribute> &recordDescriptor) {
+/*
+        // Open TABLES/COLUMNS
+        FileHandle tableFileHandle;
+        FileHandle columnFileHandle;
+        RC rc1 = rbfm->openFile(tables, tableFileHandle);
+        RC rc2 = rbfm->openFile(columns, columnFileHandle);
+        if (rc1 == FAILURE || rc2 == FAILURE) {return FAILURE;}
+*/
+
+        if (tableName == tables) {
+            tableDesc(recordDescriptor);
+            return SUCCESS;
+        }
+        if (tableName == columns) {
+            columnDesc(recordDescriptor);
+            return SUCCESS;
+        }
+
+        // format tableName
+        int l = tableName.length();
+        void* value = malloc(l);
+        memset(value, 0, l + sizeof(int) + 1);
+        formatStr(tableName, value);
+
+
+        // scan through TABLES to get table id
+        std::vector<std::string> attributeNames;
+        std::string attrName = "table-id";
+        attributeNames.push_back(attrName);
+        RM_ScanIterator rmsi_table;
+        scan(tables, "table-name", EQ_OP, value, attributeNames, rmsi_table);
+        free(value);
+
+        RID rid;
+        void* data = malloc(PAGE_SIZE);
+        rmsi_table.getNextTuple(rid, data);
+        int tableId = *(int*)data;
+        attributeNames.clear();                 // empty vector
+        free(data);
+
+        // scan through COLUMNS to get each attribute
+        attributeNames.push_back("column-name");
+        attributeNames.push_back("column-type");
+        attributeNames.push_back("column-length");
+        RM_ScanIterator rmsi_column;
+        scan(columns, "table-id", EQ_OP, &tableId, attributeNames, rmsi_column);
+
+        data = malloc(PAGE_SIZE);
+        while (rmsi_column.getNextTuple(rid, data) != RM_EOF) {
+            Attribute attribute;
+            AttrType columnType;
+            AttrLength columnLength;
+            int offset = 0;
+            int varCharLength = 0;
+
+            memcpy(&varCharLength, data, sizeof(int));
+            offset += sizeof(int);
+            char columnNameArr[varCharLength+1];
+            memcpy(&columnNameArr, (char*)data + offset, varCharLength);
+            columnNameArr[varCharLength] = '\0';
+            offset += varCharLength;
+            memcpy(&columnType, (char*)data + offset, sizeof(int));
+            offset += sizeof(int);
+            memcpy(&columnLength, (char*)data + offset, sizeof(int));
+
+            std::string columnName(columnNameArr);
+            attribute.name = columnName;
+            attribute.type = columnType;
+            attribute.length = columnLength;
+            recordDescriptor.push_back(attribute);
+        }
+/*
+        // Close files
+        rc1 = rbfm->closeFile(tableFileHandle);
+        rc2 = rbfm->closeFile((columnFileHandle));
+        if (rc1 == FAILURE || rc2 == FAILURE) {return FAILURE;}
+*/
+        return SUCCESS;
+    }
+
+    RC RelationManager::formatStr(const std::string &inBuffer, void* outBuffer) {
+        unsigned len = inBuffer.length();
+        memcpy(outBuffer, &len, sizeof(int));
+        memcpy((char*)outBuffer + sizeof(int), inBuffer.c_str(), len);
         return SUCCESS;
     }
     /***********************************/

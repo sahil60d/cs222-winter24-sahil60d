@@ -15,19 +15,19 @@ namespace PeterDB {
     RecordBasedFileManager &RecordBasedFileManager::operator=(const RecordBasedFileManager &) = default;
 
     RC RecordBasedFileManager::createFile(const std::string &fileName) {
-        return pfm->createFile(fileName);
+        return PagedFileManager::instance().createFile(fileName);
     }
 
     RC RecordBasedFileManager::destroyFile(const std::string &fileName) {
-        return pfm->destroyFile(fileName);
+        return PagedFileManager::instance().destroyFile(fileName);
     }
 
     RC RecordBasedFileManager::openFile(const std::string &fileName, FileHandle &fileHandle) {
-        return pfm->openFile(fileName, fileHandle);
+        return PagedFileManager::instance().openFile(fileName, fileHandle);
     }
 
     RC RecordBasedFileManager::closeFile(FileHandle &fileHandle) {
-        return pfm->closeFile(fileHandle);
+        return PagedFileManager::instance().closeFile(fileHandle);
     }
 
     RC RecordBasedFileManager::insertRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
@@ -47,6 +47,7 @@ namespace PeterDB {
         //insert data into page
         void *pageBuffer = malloc(PAGE_SIZE);                                           //read page to buffer
         if (fileHandle.readPage(pageNum - 1, pageBuffer) == FAILURE) {
+            free(newData);
             return FAILURE;
         }
 
@@ -103,6 +104,7 @@ namespace PeterDB {
                                           const RID &rid, void *data) {
         void *pageBuffer = malloc(PAGE_SIZE);
         if (fileHandle.readPage(rid.pageNum - 1, pageBuffer) == FAILURE) {                      //Handle error
+            free(pageBuffer);
             return FAILURE;
         }
 
@@ -111,6 +113,7 @@ namespace PeterDB {
         PageInfo *pageInfo = (PageInfo *) temppageinfo;
 
         if (rid.slotNum > pageInfo->numSlots) {
+            free(pageBuffer);
             return FAILURE;
         }
 
@@ -119,6 +122,7 @@ namespace PeterDB {
 
         // Slot unused
         if (slotDirectory->offset == -1 && slotDirectory->length == -1) {
+            free(pageBuffer);
             return FAILURE;
         }
 
@@ -206,7 +210,7 @@ namespace PeterDB {
             pageInfo->freeSpaceOffset -= slotDir->length;                               // move free space offset
 
             tempNextSdir = (char *) pageBuffer;
-            tempNextSdir += PAGE_SIZE - sizeof(PageInfo) + sizeof(Slot);
+            tempNextSdir += PAGE_SIZE - (sizeof(PageInfo) + sizeof(Slot));
             //nextSlotDir = (Slot*)tempNextSdir;
             // update record offsets
             for (int i = 1; i <= pageInfo->numSlots; i++) {
@@ -407,6 +411,7 @@ namespace PeterDB {
 
         // write to page
         fileHandle.writePage(rid.pageNum - 1, pageBuffer);
+        free(newData);
         free(pageBuffer);
         return SUCCESS;
     }
@@ -415,13 +420,67 @@ namespace PeterDB {
                                              const RID &rid, const std::string &attributeName, void *data) {
         // read the record
         void* recordBuffer = malloc(PAGE_SIZE);
-        readRecord(fileHandle, recordDescriptor, rid, recordBuffer);
+        //readRecord(fileHandle, recordDescriptor, rid, recordBuffer);
+
+        void *pageBuffer = malloc(PAGE_SIZE);
+        if (fileHandle.readPage(rid.pageNum - 1, pageBuffer) == FAILURE) {                      //Handle error
+            return FAILURE;
+        }
+
+        char *filePtr = (char *) pageBuffer;
+        char *temppageinfo = filePtr + (PAGE_SIZE - sizeof(PageInfo));
+        PageInfo *pageInfo = (PageInfo *) temppageinfo;
+
+        if (rid.slotNum > pageInfo->numSlots) {
+            return FAILURE;
+        }
+
+        char *tempSdirectory = filePtr + (PAGE_SIZE - sizeof(PageInfo) - sizeof(Slot) * rid.slotNum);
+        Slot *slotDirectory = (Slot *) tempSdirectory;
+
+        // Slot unused
+        if (slotDirectory->offset == -1 && slotDirectory->length == -1) {
+            return FAILURE;
+        }
+
+        // Slot tombstone
+        if (slotDirectory->isTomb) {
+            //get new rid
+            char *tempRID = filePtr + slotDirectory->offset;
+            const RID tombRID = *((RID *) tempRID);
+            free(pageBuffer);
+            readRecord(fileHandle, recordDescriptor, tombRID, data);
+            return SUCCESS;
+        }
+
+        // read record
+        filePtr += slotDirectory->offset;
+        int recordSize = slotDirectory->length;
+        memcpy(recordBuffer, filePtr, recordSize);
 
         // read the attribute
+        //void* attrData = malloc(PAGE_SIZE);
         if (readAttributeFromRecord(recordDescriptor, attributeName, recordBuffer, data) == FAILURE) {
+            //free(attrData);
             free(recordBuffer);
             return FAILURE;
         }
+/*
+        // add null indicator
+        char nullindicator;
+        if (attrData == nullptr) {
+            nullindicator = 0b10000000;
+        } else {
+            nullindicator = 0b00000000;
+        }
+
+        memcpy(data, &nullindicator, sizeof(char));
+
+
+
+        memcpy((char*)data + sizeof(char), attrData, *((int*)attrData) + sizeof(int));
+*/
+
 
         free(recordBuffer);
         return SUCCESS;
@@ -440,8 +499,8 @@ namespace PeterDB {
         rbfm_ScanIterator.attributeNames = attributeNames;
 
         // get Attribute info
-        if (conditionAttribute != "") {                     // not empty attribute
-            rbfm_ScanIterator.conditionAttributeNum = -1;    // in case no match
+        if (!conditionAttribute.empty()) {              // not empty attribute
+            rbfm_ScanIterator.conditionAttributeNum = NO_OP;    // in case no match
             for (int i = 0; i < recordDescriptor.size(); i++) {
                 if (recordDescriptor[i].name == conditionAttribute) {       // found match
                     rbfm_ScanIterator.conditionAttributeNum = i;
@@ -450,18 +509,21 @@ namespace PeterDB {
                 }
             }
         } else {
-            rbfm_ScanIterator.conditionAttributeNum = -1;   // empty attribute condition
+            rbfm_ScanIterator.conditionAttributeNum = NO_OP;   // empty attribute condition
         }
 
         // get value
         if (rbfm_ScanIterator.conditionAttributeType == TypeVarChar) {                   // get varchar value
-            rbfm_ScanIterator.value = malloc(*((int*)value) + 1);                   // size of entire value, including length int
-            memcpy(rbfm_ScanIterator.value, value, *((int*)value) + 1);     // copy value
+            //int t = *((int*)value);
+            rbfm_ScanIterator.value = malloc(*((int*)value));                   // size of entire value, including length int
+            memset(rbfm_ScanIterator.value, 0, *((int*)value) + 1);
+            memcpy(rbfm_ScanIterator.value, (char*)value + sizeof(int), *((int*)value));     // copy value
         } else {               // type Int/Real
             rbfm_ScanIterator.value = malloc(sizeof(int));
             memcpy(rbfm_ScanIterator.value, value, sizeof(int));
         }
 
+        //rbfm_ScanIterator.value = &value;
         // Set save RID to first slot on first page
         rbfm_ScanIterator.saveRID.pageNum = 1;
         rbfm_ScanIterator.saveRID.slotNum = 1;
@@ -491,17 +553,17 @@ namespace PeterDB {
             //free(pageBuffer);
             return pageNum;
         } else {                    //Look through directory
-            void *pageBuffer = malloc(PAGE_SIZE);
+            void *pageBuff = malloc(PAGE_SIZE);
             for (unsigned i = 0; i <= fileHandle.getNumberOfPages() - 1; i++) {
                 //void* pageBuffer = malloc(PAGE_SIZE);
-                fileHandle.readPage(i, pageBuffer);
-                char *tempPtr = (char *) pageBuffer + (PAGE_SIZE - sizeof(PageInfo));
+                fileHandle.readPage(i, pageBuff);
+                char *tempPtr = (char *) pageBuff + (PAGE_SIZE - sizeof(PageInfo));
                 PageInfo *pageInfo = (PageInfo *) tempPtr;
                 int availSize = PAGE_SIZE -
                                 (pageInfo->freeSpaceOffset + pageInfo->numSlots * sizeof(Slot) + sizeof(Slot) +
                                  sizeof(PageInfo));
                 if (size <= availSize) {
-                    free(pageBuffer);
+                    free(pageBuff);
                     return i + 1;
                 }
             }
@@ -570,8 +632,7 @@ namespace PeterDB {
         return dataSize;
     }
 
-    unsigned RecordBasedFileManager::reformatData(const std::vector<Attribute> &recordDescriptor, const void *inBuffer,
-                                                  const void *outBuffer) {
+    unsigned RecordBasedFileManager::reformatData(const std::vector<Attribute> &recordDescriptor, const void *inBuffer, void *outBuffer) {
         unsigned dataSize = 0;
         unsigned dSize = 0;
         //calc num bytes for null indicator
@@ -603,8 +664,9 @@ namespace PeterDB {
         /* Create Record Format */
         // Format == [num Fields] + [null bit indicator] + [field offsets] + [data]
 
-        //void* newData = malloc(dataSize);
-        char *newDataPtr = (char *) outBuffer;
+        void* newData = malloc(dataSize);
+        char* newDataPtr = (char*) newData;
+        //char *newDataPtr = (char *) outBuffer;
         int *nf = (int *) newDataPtr;
         *nf = numFields;
         //*newDataPtr = numFields;
@@ -621,6 +683,8 @@ namespace PeterDB {
         }
         (void *) newDataPtr;
         memcpy(newDataPtr, (char *) inBuffer + (int) nbytes, dSize);
+        memcpy(outBuffer, newData, dataSize);
+        free(newData);
         free(b);
         return dataSize;
     }
@@ -641,21 +705,25 @@ namespace PeterDB {
 
                 // check if that field data is null
                 if (checkBit((char*)nullByte, nbytes, i) == true) {
-                    attributeData = nullptr;
+                    char nullindicator = 0b10000000;
+                    memcpy(attributeData, &nullindicator, sizeof(char));
+                    //attributeData = nullptr;
                     return SUCCESS;
                 }
 
-                // get attribute data
+                // get attribute data ;offset for field points to nest field
                 unsigned sizeOffsets = numFields * sizeof(unsigned);
-                int offset = (i==0) ? 0 : *((int*)recordPtr + (i-1));
+                int offset = (i==0) ? 0 : *((int*)recordPtr + (i-1))-1;
                 recordPtr += (i==0) ? sizeOffsets : sizeOffsets + offset;
+                char nullindicator = 0b00000000;
+                memcpy(attributeData, &nullindicator, sizeof(char));
 
                 if (recordDescriptor[i].type == TypeVarChar) {
                     int varCharLength;
                     memcpy(&varCharLength, (void*)recordPtr, sizeof(int));                  // get length of var char
-                    memcpy(attributeData, (void*)recordPtr, varCharLength + sizeof(int));   // copy attribute data
+                    memcpy((char*)attributeData + sizeof(char), (void*)recordPtr, varCharLength + sizeof(int));   // copy attribute data
                 } else {            // tpye Int/Real
-                    memcpy(attributeData, (void*)recordPtr, sizeof(int));
+                    memcpy((char*)attributeData + sizeof(char), (void*)recordPtr, sizeof(int));
                 }
                 free(nullByte);
                 return SUCCESS;
@@ -664,47 +732,217 @@ namespace PeterDB {
         return FAILURE;
     }
 
-
-    RC RBFM_ScanIterator::getRecord(RID &rid, const void* pageBuffer, void* recordData) {
+    RC RBFM_ScanIterator::getRecord(RID &rid, void* recordData) {
         RecordBasedFileManager &rbfm = RecordBasedFileManager::instance();
-        rbfm.readRecord(fileHandle, recordDescriptor, rid, recordData);
+        if (rbfm.readRecord(fileHandle, recordDescriptor, rid, recordData) == FAILURE) {
+            return FAILURE;
+        }
 
-        /*
-        char* filePtr = (char*) pageBuffer;
-        PageInfo* pageInfo = (PageInfo*)(filePtr + PAGE_SIZE - sizeof(PageInfo));
-        Slot* slotDir = (Slot*)(filePtr + PAGE_SIZE - sizeof(PageInfo) - sizeof(Slot)*rid.slotNum);
-        filePtr += slotDir->offset;
-        memcpy(recordData, (void*)filePtr, slotDir->length); */
+        return SUCCESS;
+    }
 
+    RC RBFM_ScanIterator::getAttribute(RID &rid, void* attributeData) {
+        RecordBasedFileManager &rbfm = RecordBasedFileManager::instance();
+        if (rbfm.readAttribute(fileHandle, recordDescriptor, rid, conditionAttribute,attributeData) == FAILURE) {
+            return FAILURE;
+        }
+
+        return SUCCESS;
+    }
+
+    RC RBFM_ScanIterator::extractAttributes(void *data) {
+        // return to data only the requested attributes
+        RecordBasedFileManager &rbfm = RecordBasedFileManager::instance();
+        int offset = 0;
+        for (int i = 0; i < recordDescriptor.size(); i++) {
+            for (int j = 0; j < attributeNames.size(); j++) {
+                if (recordDescriptor[i].name == attributeNames[j]) {
+                    // extract
+                    void* attributeData = malloc(PAGE_SIZE);
+                    if (rbfm.readAttribute(fileHandle, recordDescriptor, saveRID, attributeNames[j], attributeData) == FAILURE) {
+                        free(attributeData);
+                        return FAILURE;
+                    }
+
+                    if (recordDescriptor[i].type == TypeVarChar) {
+                        int varCharLength;
+                        memcpy(&varCharLength, (char*)attributeData + sizeof(char), sizeof(int));                  // get length of var char
+                        memcpy((char*)data + offset, (char*)attributeData + sizeof(char), varCharLength + sizeof(int));   // copy attribute data
+                        offset += varCharLength + sizeof(int);
+                    } else {            // type Int/Real
+                        memcpy((char*)data + offset, (char*)attributeData + sizeof(char), sizeof(int));
+                        offset += sizeof(int);
+                    }
+                }
+            }
+        }
         return SUCCESS;
     }
 
 
     RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data) {
-        // Read page
-        void* pageBuffer = malloc(PAGE_SIZE);
-        if (fileHandle.readPage(saveRID.pageNum, pageBuffer) == FAILURE) {
-            free(pageBuffer);
-            return FAILURE;
+
+        if (iterated) {
+            return RBFM_EOF;
         }
 
-        char* filePtr = (char*) pageBuffer;
-        PageInfo* pageInfo = (PageInfo*)(filePtr + PAGE_SIZE - sizeof(PageInfo));
+        int exitStatus = RBFM_EOF;
+        void* pageBuffer = malloc(PAGE_SIZE);
+        void* recordData = malloc(PAGE_SIZE);
+        void* attributeData = malloc(PAGE_SIZE);
 
         // step through the pages in file
         while(saveRID.pageNum <= fileHandle.getNumberOfPages()) {
-            // check each record in page
-            if (rid.slotNum <= pageInfo->numSlots) {
-                void* recordData = malloc(PAGE_SIZE);
-
-
-
-            } else {                    // no more slots in this page
-                saveRID.pageNum++;
-                saveRID.slotNum = 0;
+            // Read page
+            if (this->fileHandle.readPage(saveRID.pageNum-1, pageBuffer) == FAILURE) {
+                free(pageBuffer);
+                free(recordData);
+                free(attributeData);
+                return FAILURE;
             }
+
+            char* filePtr = (char*) pageBuffer;
+            PageInfo* pageInfo = (PageInfo*)(filePtr + PAGE_SIZE - sizeof(PageInfo));
+
+            // check each record in page
+            while (saveRID.slotNum <= pageInfo->numSlots) {
+
+                memset(recordData, 0, PAGE_SIZE);
+                memset(attributeData, 0, PAGE_SIZE);
+
+                // read the record
+                if (getRecord(saveRID, recordData) == FAILURE) {
+                    exitStatus = RBFM_EOF;
+                }
+
+                // read attribute
+                if (getAttribute(saveRID, attributeData) == FAILURE) {                      // read attribute
+                    exitStatus = RBFM_EOF;
+                }
+
+                // compare attribute
+                bool compStatus = compareAttribute(attributeData);
+
+                if (compStatus) {
+                    // found record
+                    extractAttributes(data);                    // only requested attributes
+                    rid.slotNum = saveRID.slotNum;
+                    rid.pageNum = saveRID.pageNum;
+                    exitStatus = SUCCESS;
+                    findNext(pageInfo);                         // move save rid to next record
+                    break;
+                }
+
+                // record not found, go to next record in page
+                saveRID.slotNum++;
+            }
+
+            // record found
+            if (exitStatus == SUCCESS) {
+                break;
+            }
+
+            // record not found, go to next page
+            saveRID.slotNum = 0;
+            saveRID.pageNum++;
+
         }
 
+        free(attributeData);
+        free(recordData);
+        free(pageBuffer);
+        return exitStatus;
+    }
+
+    RC RBFM_ScanIterator::findNext(PageInfo *pageInfo) {
+        if (saveRID.slotNum < pageInfo->numSlots) {
+            saveRID.slotNum++;
+        } else if (saveRID.slotNum == pageInfo->numSlots && saveRID.pageNum < fileHandle.getNumberOfPages()) {
+            saveRID.slotNum = 0;
+            saveRID.pageNum++;
+        } else {
+            iterated = true;
+        }
+        return SUCCESS;
+    }
+
+    RC RBFM_ScanIterator::compareAttribute(const void* attributeData) {
+        if (conditionAttributeType == TypeVarChar) {
+            //char* compareData;
+            return compareVarChar((char*)attributeData + sizeof(int) + sizeof(char));
+
+        } else if (conditionAttributeType == TypeInt) {
+            int compareData;
+            memcpy(&compareData, (char*)attributeData + sizeof(char), sizeof(int));
+            return compareNum(compareData, *(int*)value);
+
+        } else if (conditionAttributeType == TypeReal) {
+            float compareData;
+            memcpy(&compareData, (char*)attributeData + sizeof(char), sizeof(int));
+            return compareNum(compareData, *(float*)value);
+
+        } else {
+            return FAILURE;
+        }
+    }
+
+    // Compares Int and Real
+    template <typename T>
+    bool RBFM_ScanIterator::compareNum(T a, T b) {
+        if (compOp == EQ_OP) {
+            return a == b;
+        } else if (compOp == LT_OP) {
+            return a < b;
+        } else if (compOp == LE_OP) {
+            return a <= b;
+        } else if (compOp == GT_OP) {
+            return a > b;
+        } else if (compOp == GE_OP) {
+            return a >= b;
+        } else if (compOp == NE_OP) {
+            return a != b;
+        } else if (compOp == NO_OP) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    // Compares VarChar
+    bool RBFM_ScanIterator::compareVarChar(const char* attributeData) {
+        // add null terminators
+        size_t valSize = std::strlen((char*)value);
+        size_t attSize = std::strlen(attributeData);
+        char* valArr = new char[valSize + 1];
+        char* attArr = new char[attSize + 1];
+        std::strncpy(valArr, (char*)value, valSize);
+        std::strncpy(attArr, attributeData, attSize);
+        valArr[valSize] = '\0';
+        attArr[attSize] = '\0';
+
+        if (compOp == EQ_OP) {
+            return (strcmp(attArr, valArr) == 0);
+        } else if (compOp == LT_OP) {
+            return (strcmp(attArr, valArr) < 0);
+        } else if (compOp == LE_OP) {
+            return (strcmp(attArr, valArr) <= 0);
+        } else if (compOp == GT_OP) {
+            return (strcmp(attArr, valArr) > 0);
+        } else if (compOp == GE_OP) {
+            return (strcmp(attArr, valArr) >= 0);
+        } else if (compOp == NE_OP) {
+            return (strcmp(attArr, valArr) != 0);
+        } else if (compOp == NO_OP) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    RC RBFM_ScanIterator::close() {
+        PagedFileManager::instance().closeFile((fileHandle));
+        free(value);
+        return SUCCESS;
     }
 
 }

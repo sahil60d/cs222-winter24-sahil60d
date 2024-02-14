@@ -18,7 +18,7 @@ namespace PeterDB {
     class PagedFileManager {
     public:
         static PagedFileManager &instance();                                // Access to the singleton instance
-
+        //PagedFileManager &pfm = instance();
         RC createFile(const std::string &fileName);                         // Create a new file
         RC destroyFile(const std::string &fileName);                        // Destroy a file
         RC openFile(const std::string &fileName, FileHandle &fileHandle);   // Open a file

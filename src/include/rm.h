@@ -9,8 +9,6 @@
 namespace PeterDB {
 #define RM_EOF (-1)  // end of a scan operator
 #define VARCHAR_SIZE 50
-#define TABLES_NAME "Tables"
-#define COLUMNS_NAME "Columns"
 
     // RM_ScanIterator is an iterator to go through tuples
     class RM_ScanIterator {
@@ -23,6 +21,8 @@ namespace PeterDB {
         RC getNextTuple(RID &rid, void *data);
 
         RC close();
+
+        RBFM_ScanIterator* rbfmsi;
     };
 
     // RM_IndexScanIterator is an iterator to go through index entries
@@ -34,14 +34,18 @@ namespace PeterDB {
         // "key" follows the same format as in IndexManager::insertEntry()
         RC getNextEntry(RID &rid, void *key);    // Get next matching entry
         RC close();                              // Terminate index scan
+
     };
 
     // Relation Manager
     class RelationManager {
     public:
         static RelationManager &instance();
+
         unsigned tableCount = 0;
         bool catExists = false;
+        std::string tables = "Tables";
+        std::string columns = "Columns";
 
         RC createCatalog();
 
@@ -92,6 +96,11 @@ namespace PeterDB {
         // Check is table name matchs TABLES/COLUMNS
         RC checkName(const std::string &tableName);
 
+        // Create record description for any table
+        RC createDesc(const std::string &tableName, std::vector<Attribute> &recordDescriptor);
+
+        // Convert string to formatted varChar
+        RC formatStr(const std::string &inBuffer, void* outBuffer);
         /********************************/
         // Extra credit work (10 points)
         RC addAttribute(const std::string &tableName, const Attribute &attr);

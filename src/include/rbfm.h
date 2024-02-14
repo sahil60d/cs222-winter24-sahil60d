@@ -82,6 +82,7 @@ namespace PeterDB {
         CompOp compOp;
         void *value;
         std::vector<std::string> attributeNames;
+        bool iterated = false;                      // true when entire file iterated
 
         RID saveRID;
 
@@ -90,10 +91,17 @@ namespace PeterDB {
         // "data" follows the same format as RecordBasedFileManager::insertRecord().
         RC getNextRecord(RID &rid, void *data);
 
-        RC close() { return -1; };
+        RC close();
 
     private:
-        RC getRecord(RID &rid, const void* pageBuffer, void* recordData);
+        RC getRecord(RID &rid, void* recordData);
+        RC getAttribute(RID &rid, void* attributeData);
+        RC compareAttribute(const void* attributeData);
+        template<typename T>
+        bool compareNum(T a, T b);
+        bool compareVarChar(const char* attributeData);
+        RC findNext(PageInfo *pageInfo);
+        RC extractAttributes(void *data);
     };
 
     class RecordBasedFileManager {
@@ -137,8 +145,7 @@ namespace PeterDB {
         bool checkBit(char* bytes, int size, int index);
 
         // Read a record identified by the given rid.
-        RC
-        readRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor, const RID &rid, void *data);
+        RC readRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor, const RID &rid, void *data);
 
         // Print the record that is passed to this utility method.
         // This method will be mainly used for debugging/testing.
@@ -161,7 +168,7 @@ namespace PeterDB {
 
         unsigned getRecordSize(const std::vector<Attribute> &recordDescriptor, const void *data);
 
-        unsigned reformatData(const std::vector<Attribute> &recordDescriptor, const void *inBuffer, const void *outBuffer);
+        unsigned reformatData(const std::vector<Attribute> &recordDescriptor, const void *inBuffer, void *outBuffer);
 
         // Read an attribute given its name and the rid.
         RC readAttribute(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor, const RID &rid,
