@@ -48,6 +48,7 @@ namespace PeterDB {
         void *pageBuffer = malloc(PAGE_SIZE);                                           //read page to buffer
         if (fileHandle.readPage(pageNum - 1, pageBuffer) == FAILURE) {
             free(newData);
+            free(pageBuffer);
             return FAILURE;
         }
 
@@ -162,6 +163,7 @@ namespace PeterDB {
                                             const RID &rid) {
         void *pageBuffer = malloc(PAGE_SIZE);
         if (fileHandle.readPage(rid.pageNum - 1, pageBuffer) == FAILURE) {
+            free(pageBuffer);
             return FAILURE;
         }
 
@@ -424,6 +426,8 @@ namespace PeterDB {
 
         void *pageBuffer = malloc(PAGE_SIZE);
         if (fileHandle.readPage(rid.pageNum - 1, pageBuffer) == FAILURE) {                      //Handle error
+            free(recordBuffer);
+            free(pageBuffer);
             return FAILURE;
         }
 
@@ -432,6 +436,8 @@ namespace PeterDB {
         PageInfo *pageInfo = (PageInfo *) temppageinfo;
 
         if (rid.slotNum > pageInfo->numSlots) {
+            free(recordBuffer);
+            free(pageBuffer);
             return FAILURE;
         }
 
@@ -440,6 +446,8 @@ namespace PeterDB {
 
         // Slot unused
         if (slotDirectory->offset == -1 && slotDirectory->length == -1) {
+            free(recordBuffer);
+            free(pageBuffer);
             return FAILURE;
         }
 
@@ -448,6 +456,7 @@ namespace PeterDB {
             //get new rid
             char *tempRID = filePtr + slotDirectory->offset;
             const RID tombRID = *((RID *) tempRID);
+            free(recordBuffer);
             free(pageBuffer);
             readRecord(fileHandle, recordDescriptor, tombRID, data);
             return SUCCESS;
@@ -462,6 +471,7 @@ namespace PeterDB {
         //void* attrData = malloc(PAGE_SIZE);
         if (readAttributeFromRecord(recordDescriptor, attributeName, recordBuffer, data) == FAILURE) {
             //free(attrData);
+            free(pageBuffer);
             free(recordBuffer);
             return FAILURE;
         }
@@ -481,7 +491,7 @@ namespace PeterDB {
         memcpy((char*)data + sizeof(char), attrData, *((int*)attrData) + sizeof(int));
 */
 
-
+        free(pageBuffer);
         free(recordBuffer);
         return SUCCESS;
     }
@@ -517,6 +527,7 @@ namespace PeterDB {
         }
 
         // get value
+
         if (rbfm_ScanIterator.conditionAttributeType == TypeVarChar) {                   // get varchar value
             //int t = *((int*)value);
             rbfm_ScanIterator.value = malloc(*((int*)value));                   // size of entire value, including length int
@@ -526,6 +537,7 @@ namespace PeterDB {
             rbfm_ScanIterator.value = malloc(sizeof(int));
             memcpy(rbfm_ScanIterator.value, value, sizeof(int));
         }
+
 
         //rbfm_ScanIterator.value = &value;
         // Set save RID to first slot on first page
@@ -712,6 +724,7 @@ namespace PeterDB {
                     char nullindicator = 0b10000000;
                     memcpy(attributeData, &nullindicator, sizeof(char));
                     //attributeData = nullptr;
+                    free(nullByte);
                     return SUCCESS;
                 }
 
@@ -756,6 +769,12 @@ namespace PeterDB {
 
     RC RBFM_ScanIterator::extractAttributes(void *data) {
         // return to data only the requested attributes
+        // include null-indicator only on requested attributes
+        void* returnData = malloc(PAGE_SIZE);
+        memset(returnData, 0, PAGE_SIZE);
+        int attr[attributeNames.size()];
+        std::fill(attr, attr + attributeNames.size(), 0);
+
         RecordBasedFileManager &rbfm = RecordBasedFileManager::instance();
         int offset = 0;
         for (int i = 0; i < recordDescriptor.size(); i++) {
@@ -768,18 +787,47 @@ namespace PeterDB {
                         return FAILURE;
                     }
 
+                    // check if attribute is null
+                    void* nb = malloc(sizeof(char));
+                    memcpy(nb, attributeData, sizeof(char));
+                    if (rbfm.checkBit((char*)nb, sizeof(char), 0)) {
+                        attr[j] = 1;
+                    }
+                    free(nb);
+
                     if (recordDescriptor[i].type == TypeVarChar) {
                         int varCharLength;
                         memcpy(&varCharLength, (char*)attributeData + sizeof(char), sizeof(int));                  // get length of var char
-                        memcpy((char*)data + offset, (char*)attributeData + sizeof(char), varCharLength + sizeof(int));   // copy attribute data
+                        memcpy((char*)returnData + offset, (char*)attributeData + sizeof(char), varCharLength + sizeof(int));   // copy attribute data
                         offset += varCharLength + sizeof(int);
                     } else {            // type Int/Real
-                        memcpy((char*)data + offset, (char*)attributeData + sizeof(char), sizeof(int));
+                        memcpy((char*)returnData + offset, (char*)attributeData + sizeof(char), sizeof(int));
                         offset += sizeof(int);
                     }
+                    free(attributeData);
                 }
             }
         }
+
+        // add null indicator to front of data
+        double size = ceil((double)attributeNames.size()/8);
+        for (int i = 0; i < size; i++) {
+            *((char*)data + i) = 0b00000000;
+        }
+
+        for (int i : attr) {
+            if (attr[i] == 1) {
+                double nb = floor((double)i / 8);
+                *((char *) data + (int)nb) |= 0b10000000 >> (i % 8);
+            } else {
+                double nb = floor((double)i / 8);
+                *((char *) data + (int)nb) |= 0b00000000 >> (i % 8);
+            }
+        }
+
+        memcpy((char*)data + (int)size, returnData, offset);
+
+        free(returnData);
         return SUCCESS;
     }
 
@@ -792,7 +840,7 @@ namespace PeterDB {
 
         int exitStatus = RBFM_EOF;
         void* pageBuffer = malloc(PAGE_SIZE);
-        void* recordData = malloc(PAGE_SIZE);
+        //void* recordData = malloc(PAGE_SIZE);
         void* attributeData = malloc(PAGE_SIZE);
 
         // step through the pages in file
@@ -800,7 +848,7 @@ namespace PeterDB {
             // Read page
             if (this->fileHandle.readPage(saveRID.pageNum-1, pageBuffer) == FAILURE) {
                 free(pageBuffer);
-                free(recordData);
+                //free(recordData);
                 free(attributeData);
                 return FAILURE;
             }
@@ -811,23 +859,28 @@ namespace PeterDB {
             // check each record in page
             while (saveRID.slotNum <= pageInfo->numSlots) {
 
-                memset(recordData, 0, PAGE_SIZE);
+                //memset(recordData, 0, PAGE_SIZE);
                 memset(attributeData, 0, PAGE_SIZE);
 
+                /*
                 // read the record
                 if (getRecord(saveRID, recordData) == FAILURE) {
                     exitStatus = RBFM_EOF;
                 }
+*/
+                bool compStatus = false;
 
-                // read attribute
-                if (getAttribute(saveRID, attributeData) == FAILURE) {                      // read attribute
-                    exitStatus = RBFM_EOF;
+                if (compOp != NO_OP) {
+                    // read attribute
+                    if (getAttribute(saveRID, attributeData) == FAILURE) {                      // read attribute
+                        exitStatus = RBFM_EOF;
+                    }
+
+                    // compare attribute
+                    compStatus = compareAttribute(attributeData);
                 }
 
-                // compare attribute
-                bool compStatus = compareAttribute(attributeData);
-
-                if (compStatus) {
+                if (compStatus || compOp == NO_OP) {
                     // found record
                     extractAttributes(data);                    // only requested attributes
                     rid.slotNum = saveRID.slotNum;
@@ -847,13 +900,13 @@ namespace PeterDB {
             }
 
             // record not found, go to next page
-            saveRID.slotNum = 0;
+            saveRID.slotNum = 1;
             saveRID.pageNum++;
 
         }
 
         free(attributeData);
-        free(recordData);
+        //free(recordData);
         free(pageBuffer);
         return exitStatus;
     }
@@ -862,7 +915,7 @@ namespace PeterDB {
         if (saveRID.slotNum < pageInfo->numSlots) {
             saveRID.slotNum++;
         } else if (saveRID.slotNum == pageInfo->numSlots && saveRID.pageNum < fileHandle.getNumberOfPages()) {
-            saveRID.slotNum = 0;
+            saveRID.slotNum = 1;
             saveRID.pageNum++;
         } else {
             iterated = true;

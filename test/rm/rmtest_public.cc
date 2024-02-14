@@ -341,6 +341,9 @@ namespace PeterDBTesting {
             unsigned age = 20 + i;
             prepareTuple((int) attrs.size(), nullsIndicator, 6, "Tester", age, height, (float) (age * 12.5), inBuffer, tupleSize);
             ages.insert(age);
+            if (i == 75) {
+                int t = 5;
+            }
             ASSERT_EQ(rm.insertTuple(tableName, inBuffer, rid), success)
                                         << "RelationManager::insertTuple() should succeed.";
 
@@ -357,6 +360,10 @@ namespace PeterDBTesting {
         while (rmsi.getNextTuple(rid, outBuffer) != RM_EOF) {
             unsigned returnedAge = *(unsigned *) ((uint8_t *) outBuffer + 1);
             auto target = ages.find(returnedAge);
+
+            if (returnedAge == 93) {
+                int r = 6;
+            }
             ASSERT_NE(target, ages.end()) << "Returned age is not from the inserted ones.";
             ages.erase(target);
         }

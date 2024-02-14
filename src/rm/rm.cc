@@ -152,7 +152,8 @@ namespace PeterDB {
         rbfm->openFile(tables, tableFileHandle);
 
         rmsi_table.getNextTuple(tableRid, data);
-        int tableId = *(int*)data;
+        //int tableId = *(int*)data;
+        int tableId = *((int*)((char*)data + sizeof(char)));
         rbfm->deleteRecord(tableFileHandle, recordDescriptor, tableRid);
 
         rbfm->closeFile(tableFileHandle);
@@ -178,6 +179,7 @@ namespace PeterDB {
 
         //tableCount--;
         free(value);
+        free(data);
         return SUCCESS;
     }
 
@@ -511,9 +513,10 @@ namespace PeterDB {
         RID rid;
         void* data = malloc(PAGE_SIZE);
         rmsi_table.getNextTuple(rid, data);
-        int tableId = *(int*)data;
+        //int tableId = *(int*)data;
+        int tableId = *((int*)((char*)data + sizeof(char)));
         attributeNames.clear();                 // empty vector
-        free(data);
+        //free(data);
 
         // scan through COLUMNS to get each attribute
         attributeNames.push_back("column-name");
@@ -522,15 +525,16 @@ namespace PeterDB {
         RM_ScanIterator rmsi_column;
         scan(columns, "table-id", EQ_OP, &tableId, attributeNames, rmsi_column);
 
-        data = malloc(PAGE_SIZE);
+        //data = malloc(PAGE_SIZE);
+        memset(data, 0, PAGE_SIZE);
         while (rmsi_column.getNextTuple(rid, data) != RM_EOF) {
             Attribute attribute;
             AttrType columnType;
             AttrLength columnLength;
-            int offset = 0;
+            int offset = 1;             // set to skip over null indicator
             int varCharLength = 0;
 
-            memcpy(&varCharLength, data, sizeof(int));
+            memcpy(&varCharLength, (char*)data + offset, sizeof(int));
             offset += sizeof(int);
             char columnNameArr[varCharLength+1];
             memcpy(&columnNameArr, (char*)data + offset, varCharLength);
@@ -552,6 +556,7 @@ namespace PeterDB {
         rc2 = rbfm->closeFile((columnFileHandle));
         if (rc1 == FAILURE || rc2 == FAILURE) {return FAILURE;}
 */
+        free(data);
         return SUCCESS;
     }
 
