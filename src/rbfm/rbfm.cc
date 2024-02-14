@@ -510,6 +510,10 @@ namespace PeterDB {
             }
         } else {
             rbfm_ScanIterator.conditionAttributeNum = NO_OP;   // empty attribute condition
+            rbfm_ScanIterator.saveRID.pageNum = 1;
+            rbfm_ScanIterator.saveRID.slotNum = 1;
+
+            return SUCCESS;
         }
 
         // get value
@@ -568,7 +572,7 @@ namespace PeterDB {
                 }
             }
             //If no space create new page and return new page number
-            free(pageBuffer);
+            //free(pageBuffer);
             return newPage(fileHandle);
         }
     }
@@ -867,6 +871,9 @@ namespace PeterDB {
     }
 
     RC RBFM_ScanIterator::compareAttribute(const void* attributeData) {
+        if (compOp == NO_OP) {
+            return true;
+        }
         if (conditionAttributeType == TypeVarChar) {
             //char* compareData;
             return compareVarChar((char*)attributeData + sizeof(int) + sizeof(char));
