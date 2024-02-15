@@ -46,14 +46,14 @@ namespace PeterDB {
 
         tableCount++;
         insertTables(tableFileHandle, tableRecordDescription, tableRID, "Tables", "Tables");
-        for (int i = 1; i <= tableRecordDescription.size(); i++) {
-            insertColumns(columnFileHandle, columnRecordDescription, columnRID, tableRecordDescription[i].name, tableRecordDescription[i].type, tableRecordDescription[i].length, i);
+        for (int i = 0; i < tableRecordDescription.size(); i++) {
+            insertColumns(columnFileHandle, columnRecordDescription, columnRID, tableRecordDescription[i].name, tableRecordDescription[i].type, tableRecordDescription[i].length, i+1);
         }
 
         tableCount++;
         insertTables(tableFileHandle, tableRecordDescription, tableRID, "Columns", "Columns");
-        for (int i = 1; i <= columnRecordDescription.size(); i++) {
-            insertColumns(columnFileHandle, columnRecordDescription, columnRID, columnRecordDescription[i].name, columnRecordDescription[i].type, columnRecordDescription[i].length, i);
+        for (int i = 0; i < columnRecordDescription.size(); i++) {
+            insertColumns(columnFileHandle, columnRecordDescription, columnRID, columnRecordDescription[i].name, columnRecordDescription[i].type, columnRecordDescription[i].length, i+1);
         }
 
         // close files
@@ -135,6 +135,7 @@ namespace PeterDB {
         // format tableName
         int l = tableName.length();
         void* value = malloc(l);
+        memset(value, 0, l);
         formatStr(tableName, value);
 
         // remove from TABLES
@@ -146,6 +147,7 @@ namespace PeterDB {
         FileHandle tableFileHandle;
         RID tableRid;
         void* data = malloc(PAGE_SIZE);
+        memset(data, 0, PAGE_SIZE);
         std::vector<Attribute> recordDescriptor;
         tableDesc(recordDescriptor);
 
@@ -412,6 +414,7 @@ namespace PeterDB {
         int fileNameLen = fileName.length();
         int dataSize = sizeof(char) + sizeof(int)*3 + tableNameLen + fileNameLen;         // get size of data
         void *data = malloc(dataSize);
+        memset(data, 0, dataSize);
 
         // store info into data
         int tableId = tableCount;
@@ -441,6 +444,7 @@ namespace PeterDB {
         int columnNameLen = columnName.length();
         int dataSize = sizeof(char) + sizeof(int)*5 + columnNameLen;
         void *data = malloc(dataSize);
+        memset(data, 0, dataSize);
 
         // store info into data
         int tableId = tableCount;
@@ -512,6 +516,7 @@ namespace PeterDB {
 
         RID rid;
         void* data = malloc(PAGE_SIZE);
+        memset(data, 0, PAGE_SIZE);
         rmsi_table.getNextTuple(rid, data);
         //int tableId = *(int*)data;
         int tableId = *((int*)((char*)data + sizeof(char)));

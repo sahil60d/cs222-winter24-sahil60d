@@ -151,8 +151,9 @@ namespace PeterDB {
         char *tdata = (char *) data;
         tdata += (int) nbytes;
         readDataPtr += (int) nbytes + (int) (numFields * sizeof(unsigned));
-        recordSize -= sizeof(unsigned) + int(nbytes) + (int) (numFields * sizeof(unsigned));
+        recordSize -= (int)(sizeof(unsigned) + int(nbytes) + (int) (numFields * sizeof(unsigned)));
         memcpy(tdata, readDataPtr, recordSize);
+        //int test = sizeof(data);
 
         free(readData);
         free(pageBuffer);
@@ -663,6 +664,7 @@ namespace PeterDB {
         //calc size of data
         for (int i = 0; i < recordDescriptor.size(); i++) {
             if (checkBit((char *) b, nbytes, i) == true) {
+                offsets[i] = dataSize;          // point to same place as prev
                 continue;
             }
             if (recordDescriptor[i].type == TypeVarChar) {
