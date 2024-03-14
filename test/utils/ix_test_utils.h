@@ -205,7 +205,7 @@ namespace PeterDBTesting {
                                       T salt = 2, T fixedKey = 0) {
 
             for (unsigned i = 0; i < numOfTuples; i++) {
-                if (i == 145) {
+                if (i == 10658) {
                     int p = 0;
                 }
                 T value = i + seed;

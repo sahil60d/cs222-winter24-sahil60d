@@ -109,7 +109,7 @@ namespace PeterDB {
         }
 
         free(keyDesc.key);
-        free(page);
+        //free(page);
         return SUCCESS;
     }
 
@@ -378,7 +378,7 @@ namespace PeterDB {
                 break;
             }
 
-            if (offset == nodeDesc.size) {
+            if ((offset + (sizeof(KeyDesc) + currKey.keySize)) == nodeDesc.size) {
                 currPage = currKey.right;
                 break;
             }
@@ -396,10 +396,11 @@ namespace PeterDB {
         void *checkPage = malloc(PAGE_SIZE);
         NodeDesc checkNode;
         KeyDesc newKeyDesc;
+        newKeyDesc.key = malloc(PAGE_SIZE);
         TreeOp insertOp;
 
         ixfileHandle.readPage(currPage, checkPage);
-        memcpy(&checkNode, (char *)page + PAGE_SIZE - sizeof(NodeDesc),
+        memcpy(&checkNode, (char *)checkPage + PAGE_SIZE - sizeof(NodeDesc),
                sizeof(NodeDesc));
 
         if (checkNode.type == LEAF) {
@@ -416,7 +417,7 @@ namespace PeterDB {
             // move up key into parent, split in case of overflow (parentSplitNeeded)
             // if no split, add key and update right siblings left node pointer
 
-            if (parentSplitNeeded) {
+            if (parentSplitNeeded == Split_OP) {
                 // split parent
                 void *newNode = malloc(PAGE_SIZE);
                 unsigned off = 0;
@@ -445,17 +446,21 @@ namespace PeterDB {
                 memcpy((char*)newNode, (char*)page + off, newNodeDesc.size);
 
                 // get first key from new node
-                KeyDesc firstKey;
-                memcpy(&firstKey, (char*)newNode, sizeof(KeyDesc));
-                firstKey.left = pageNum;
-                firstKey.right = newNodeDesc.next;
+                //KeyDesc firstKey;
+                //memcpy(&firstKey, (char*)newNode, sizeof(KeyDesc));
+                //firstKey.left = pageNum;
+                //firstKey.right = newNodeDesc.next;
 
-                keyDesc.keySize = firstKey.keySize;
-                memcpy(keyDesc.key, (char*)newNode + sizeof(KeyDesc), firstKey.keySize);
+                memcpy(&keyDesc, (char*)newNode, sizeof(KeyDesc));
+                keyDesc.left = pageNum;
+                keyDesc.right = newNodeDesc.next;
+
+                //keyDesc.keySize = firstKey.keySize;
+                memcpy(keyDesc.key, (char*)newNode + sizeof(KeyDesc), keyDesc.keySize);
 
                 // key don't get copied in internal nodes so remove it.
-                memmove((char*)newNode, (char*)newNode + sizeof(KeyDesc) + firstKey.keySize, newNodeDesc.size - (sizeof(KeyDesc) + firstKey.keySize));
-                newNodeDesc.size -= sizeof(KeyDesc) + firstKey.keySize;
+                memmove((char*)newNode, (char*)newNode + sizeof(KeyDesc) + keyDesc.keySize, newNodeDesc.size - (sizeof(KeyDesc) + keyDesc.keySize));
+                newNodeDesc.size -= sizeof(KeyDesc) + keyDesc.keySize;
 
                 // write pages
                 ixfileHandle.writePage(pageNum, page);
@@ -530,7 +535,11 @@ namespace PeterDB {
         free(checkPage);
 
         // return parentSplitNeeded in case root needs to be split.
-        return parentSplitNeeded;
+        if (insertOp == Split_OP && parentSplitNeeded == Split_OP) {
+            return Split_OP;
+        } else {
+            return No_OP;
+        }
     }
 
     PageNum IndexManager::findFree(IXFileHandle &ixfileHandle) {
@@ -634,13 +643,13 @@ RC IndexManager::shiftTree(IXFileHandle &ixfileHandle, Attribute &attribute,
         void *data = malloc(PAGE_SIZE);
 
         // read and update page 0 (points to root)
-        if (ixfileHandle.readPage(pageNum, data) == FAILURE) {
+        if (ixfileHandle.readPage(1, data) == FAILURE) {
             return FAILURE;
         }
 
         memcpy((char *)data, &pageNum, sizeof(PageNum));
 
-        if (ixfileHandle.writePage(pageNum, data) == FAILURE) {
+        if (ixfileHandle.writePage(1, data) == FAILURE) {
             return FAILURE;
         }
 
