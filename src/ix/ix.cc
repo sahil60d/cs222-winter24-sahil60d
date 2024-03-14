@@ -172,7 +172,7 @@ namespace PeterDB {
             while (offset < nodeDesc.size / 2) {
                 DataDesc data;
                 memcpy(&data, (char *)page + offset, sizeof(DataDesc));
-                offset += sizeof(DataDesc) + data.numRIDs + data.keySize + sizeof(RID);
+                offset += sizeof(DataDesc) + data.keySize + (data.numRIDs * sizeof(RID));
             }
 
             // find/create new page for split
@@ -219,7 +219,7 @@ namespace PeterDB {
             memcpy(&firstKey, (char *)newPage, sizeof(DataDesc));
 
             keyDesc.keySize = firstKey.keySize;
-            memcpy(keyDesc.key, (char *)newPage + sizeof(DataDesc), firstKey.keySize);
+            memcpy(keyDesc.key, (char *)newPage + (sizeof(DataDesc) - sizeof(void*)), keyDesc.keySize);
             keyDesc.left = pageNum;   // orginal node
             keyDesc.right = freeNode; // new split node
 
@@ -342,7 +342,7 @@ namespace PeterDB {
         }
 
         ixfileHandle.writePage(pageNum, page);
-        free(newPage);
+        //free(newPage);
         return op;
     }
 
@@ -537,8 +537,10 @@ namespace PeterDB {
         void *page = malloc(PAGE_SIZE);
 
         // Check each node (page), free if size == 0
-        for (int i = 1; i <= ixfileHandle.getNumNodes(); i++) {
+        for (int i = 2; i <= ixfileHandle.getNumNodes(); i++) {
             // Get page info
+            ixfileHandle.readPage(i, page);
+
             NodeDesc nodeDesc;
             memcpy(&nodeDesc, (char *)page + PAGE_SIZE - sizeof(NodeDesc),
                    sizeof(nodeDesc));

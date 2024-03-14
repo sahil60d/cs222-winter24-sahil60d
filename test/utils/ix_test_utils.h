@@ -205,6 +205,9 @@ namespace PeterDBTesting {
                                       T salt = 2, T fixedKey = 0) {
 
             for (unsigned i = 0; i < numOfTuples; i++) {
+                if (i == 145) {
+                    int p = 0;
+                }
                 T value = i + seed;
                 rid.pageNum = (unsigned) (value * salt + seed) % INT_MAX;
                 rid.slotNum = (unsigned) (value * salt * seed + seed) % SHRT_MAX;
