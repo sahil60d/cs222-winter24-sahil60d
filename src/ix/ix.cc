@@ -1,5 +1,4 @@
 #include "src/include/ix.h"
-#include "src/include/ix.h"
 #include "src/include/pfm.h"
 #include "src/include/qe.h"
 #include "src/include/rbfm.h"
@@ -74,27 +73,44 @@ namespace PeterDB {
                sizeof(NodeDesc));
 
         // check type; insert to leaf, traverse in non-leaf
+        TreeOp resultOP;
         if (nodeDesc.type == LEAF) { // Root is Leaf node
             // insert into leaf node
             // return is tree operation was used
             // if split occured update tree path
-            TreeOp resultOP =
-                    insertLeaf(ixFileHandle, attribute, key, rid, rootPage, keyDesc, page);
-
-            if (resultOP == Split_OP) {
-            }
-            free(keyDesc.key);
-            free(page);
-            return SUCCESS;
+            resultOP = insertLeaf(ixFileHandle, attribute, key, rid, rootPage, keyDesc, page);
         } else { // Non-Leaf
-            TreeOp resultOP = searchInsert(ixFileHandle, attribute, key, rid, rootPage,
+            resultOP = searchInsert(ixFileHandle, attribute, key, rid, rootPage,
                                            keyDesc, page);
-            free(keyDesc.key);
-            free(page);
-            return SUCCESS;
         }
 
-        return FAILURE;
+        // check if root was split. Create new root node with pushed up key
+        if (resultOP == Split_OP) {
+            // Create new root page and node desc
+            PageNum newRootnum = findFree(ixFileHandle);
+            NodeDesc newRootDesc;
+            newRootDesc.type = NON_LEAF;
+            newRootDesc.size = sizeof(KeyDesc) + keyDesc.keySize;
+
+            void *newRootPage = malloc(PAGE_SIZE);
+            memcpy((char*)newRootPage + (PAGE_SIZE - sizeof(NodeDesc)), &newRootDesc, sizeof(NodeDesc));
+
+            // write key to page
+            memcpy((char*)newRootPage, &keyDesc, sizeof(KeyDesc));
+            memcpy((char*)newRootPage + sizeof(KeyDesc), keyDesc.key, keyDesc.keySize);
+
+            // update root page pointer
+            newRoot(ixFileHandle, newRootnum);
+
+            // write page
+            if (ixFileHandle.writePage(newRootnum, newRootPage) == FAILURE) { return FAILURE; }
+
+            free(newRootPage);
+        }
+
+        free(keyDesc.key);
+        free(page);
+        return SUCCESS;
     }
 
     PageNum IndexManager::findRoot(IXFileHandle &ixFileHandle) {
@@ -144,7 +160,7 @@ namespace PeterDB {
 
         // New split page
         void *newPage = malloc(PAGE_SIZE);
-        int offset = 0;
+        unsigned offset = 0;
         bool inserted = false;
 
         // split page if adding exceds upper threshold
@@ -348,7 +364,6 @@ namespace PeterDB {
             memcpy(&currKey, (char *)page + offset, sizeof(KeyDesc));
             currKey.key = malloc(currKey.keySize);
             memcpy(currKey.key, (char *)page + sizeof(KeyDesc), currKey.keySize);
-            offset += sizeof(KeyDesc) + currKey.keySize;
 
             // compare entry key to current key
             // <0 -> left node
@@ -360,7 +375,6 @@ namespace PeterDB {
             if (comp < 0) {
                 // left node
                 currPage = currKey.left;
-                offset -= currKey.keySize + sizeof(KeyDesc);
                 break;
             }
 
@@ -368,6 +382,14 @@ namespace PeterDB {
                 currPage = currKey.right;
                 break;
             }
+
+            offset += sizeof(KeyDesc) + currKey.keySize;
+        }
+
+        // check if parent needs to be split on entry
+        TreeOp parentSplitNeeded = No_OP;
+        if (nodeDesc.size + keySize(attribute, key) > UPPER_THRES) {
+            parentSplitNeeded = Split_OP;
         }
 
         // if node is leaf use insert leaf, else recursive call searchInsert
@@ -388,6 +410,127 @@ namespace PeterDB {
             insertOp = searchInsert(ixfileHandle, attribute, key, rid, currPage,
                                     newKeyDesc, checkPage);
         }
+
+        if (insertOp == Split_OP) {
+            // update parent nodes
+            // move up key into parent, split in case of overflow (parentSplitNeeded)
+            // if no split, add key and update right siblings left node pointer
+
+            if (parentSplitNeeded) {
+                // split parent
+                void *newNode = malloc(PAGE_SIZE);
+                unsigned off = 0;
+
+                // get offset of half the data
+                while (off < nodeDesc.size / 2) {
+                    KeyDesc checkKey;
+                    memcpy(&checkKey, (char*)page + off, sizeof(KeyDesc));
+                    off += sizeof(KeyDesc) + checkKey.keySize;
+                }
+
+                // find/create new page for split
+                //PageNum freeNode = findFree(ixfileHandle);
+
+                // add split data to new node
+                // create new node descriptor
+                NodeDesc newNodeDesc;
+                newNodeDesc.type = NON_LEAF;
+                newNodeDesc.size = nodeDesc.size - off;
+                newNodeDesc.next = findFree(ixfileHandle);
+
+                // update original node descriptor
+                nodeDesc.size = off;
+
+                // move data
+                memcpy((char*)newNode, (char*)page + off, newNodeDesc.size);
+
+                // get first key from new node
+                KeyDesc firstKey;
+                memcpy(&firstKey, (char*)newNode, sizeof(KeyDesc));
+                firstKey.left = pageNum;
+                firstKey.right = newNodeDesc.next;
+
+                keyDesc.keySize = firstKey.keySize;
+                memcpy(keyDesc.key, (char*)newNode + sizeof(KeyDesc), firstKey.keySize);
+
+                // key don't get copied in internal nodes so remove it.
+                memmove((char*)newNode, (char*)newNode + sizeof(KeyDesc) + firstKey.keySize, newNodeDesc.size - (sizeof(KeyDesc) + firstKey.keySize));
+                newNodeDesc.size -= sizeof(KeyDesc) + firstKey.keySize;
+
+                // write pages
+                ixfileHandle.writePage(pageNum, page);
+                ixfileHandle.writePage(newNodeDesc.next, newNode);
+
+                // node has been split, determine which node and where to enter key based on offset value
+                // offset < nodeDesc.size -> original node, put it where it is
+                // offset = nodeDesc.size -> new node, subtract nodeDesc.size from offset and enter
+
+                if (offset >= nodeDesc.size) {
+                    offset -= nodeDesc.size;
+
+                    // add key
+                    memmove((char*) newNode + offset + sizeof(KeyDesc) + newKeyDesc.keySize, (char*)newNode + offset, nodeDesc.size - offset);
+                    memcpy((char*)newNode + offset, &newKeyDesc, sizeof(KeyDesc));
+                    memcpy((char*)newNode + offset + sizeof(KeyDesc), newKeyDesc.key, newKeyDesc.keySize);
+
+                    // update right sibling
+                    KeyDesc rightSib;
+                    memcpy(&rightSib, (char*)newNode + offset + sizeof(KeyDesc) + newKeyDesc.keySize, sizeof(KeyDesc));
+                    rightSib.left = newKeyDesc.right;
+                    memcpy((char*)newNode + offset + sizeof(KeyDesc) + newKeyDesc.keySize, &rightSib, sizeof(KeyDesc));
+
+                    // update node info (size)
+                    newNodeDesc.size += sizeof(KeyDesc) + newKeyDesc.keySize;
+                    memcpy((char*)newNode + (PAGE_SIZE - sizeof(NodeDesc)), &nodeDesc, sizeof(NodeDesc));
+
+                    // write page
+                    ixfileHandle.writePage(nodeDesc.next, newNode);
+                } else {
+                    memmove((char*)page + offset + newKeyDesc.keySize + sizeof(KeyDesc), (char*)page + offset, nodeDesc.size - offset);
+                    memcpy((char*)page + offset, &newKeyDesc, sizeof(KeyDesc));
+                    memcpy((char*)page + offset + sizeof(KeyDesc), newKeyDesc.key, newKeyDesc.keySize);
+
+                    // update right sibling
+                    KeyDesc rightSib;
+                    memcpy(&rightSib, (char*)page + offset + sizeof(KeyDesc) + newKeyDesc.keySize, sizeof(KeyDesc));
+                    rightSib.left = newKeyDesc.right;
+                    memcpy((char*)page + offset + sizeof(KeyDesc) + newKeyDesc.keySize, &rightSib, sizeof(KeyDesc));
+
+                    // update node info (size)
+                    nodeDesc.size += sizeof(KeyDesc) + newKeyDesc.keySize;
+                    memcpy((char*)page + (PAGE_SIZE - sizeof(NodeDesc)), &nodeDesc, sizeof(NodeDesc));
+
+                    // write page
+                    ixfileHandle.writePage(pageNum, page);
+                }
+
+            } else {
+                // no overflow in parent node
+                //add key (move remaining keys right, then add keyDesc, then add key val)
+                memmove((char*)page + offset + newKeyDesc.keySize + sizeof(KeyDesc), (char*)page + offset, nodeDesc.size - offset);
+                memcpy((char*)page + offset, &newKeyDesc, sizeof(KeyDesc));
+                memcpy((char*)page + offset + sizeof(KeyDesc), newKeyDesc.key, newKeyDesc.keySize);
+
+                // update right sibling
+                KeyDesc rightSib;
+                memcpy(&rightSib, (char*)page + offset + sizeof(KeyDesc) + newKeyDesc.keySize, sizeof(KeyDesc));
+                rightSib.left = newKeyDesc.right;
+                memcpy((char*)page + offset + sizeof(KeyDesc) + newKeyDesc.keySize, &rightSib, sizeof(KeyDesc));
+
+                // update node info (size)
+                nodeDesc.size += sizeof(KeyDesc) + newKeyDesc.keySize;
+                memcpy((char*)page + (PAGE_SIZE - sizeof(NodeDesc)), &nodeDesc, sizeof(NodeDesc));
+
+                // write page
+                ixfileHandle.writePage(pageNum, page);
+            }
+        }
+
+        free(currKey.key);
+        free(checkPage);
+
+        // return parentSplitNeeded in case root needs to be split.
+        return parentSplitNeeded;
     }
 
     PageNum IndexManager::findFree(IXFileHandle &ixfileHandle) {
@@ -522,10 +665,10 @@ RC IndexManager::shiftTree(IXFileHandle &ixfileHandle, Attribute &attribute,
             // root is leaf, find rid and delete
             DataDesc data;
             unsigned offset = 0;
-            while (offset <= nodeDesc.size) {
+            while (offset < nodeDesc.size) {
                 memcpy(&data, (char *)page + offset, sizeof(DataDesc));
                 data.key = malloc(data.keySize);
-                memcpy(&data.key, (char *)page + offset + sizeof(DataDesc), data.keySize);
+                memcpy(data.key, (char *)page + offset + sizeof(DataDesc), data.keySize);
 
                 if (compareKey(attribute, key, data.key) == 0) {
                     // match
@@ -534,17 +677,26 @@ RC IndexManager::shiftTree(IXFileHandle &ixfileHandle, Attribute &attribute,
                         unsigned lenToRID =
                                 sizeof(DataDesc) + data.keySize + (i * sizeof(RID));
                         memcpy(&temp_rid, (char *)page + offset + lenToRID, sizeof(RID));
-                        if (temp_rid.pageNum == rid.pageNum &&
-                            temp_rid.slotNum == rid.slotNum) {
+                        if (temp_rid.pageNum == rid.pageNum && temp_rid.slotNum == rid.slotNum) {
+
                             // found rid, update page
-                            unsigned remainSize =
-                                    nodeDesc.size - offset - lenToRID - sizeof(RID);
-                            memmove((char *)page + offset + lenToRID,
-                                    (char *)page + offset + lenToRID + sizeof(RID),
-                                    sizeof(RID));
+                            unsigned remainSize = nodeDesc.size - offset - lenToRID - sizeof(RID);
+                            memmove((char *)page + offset + lenToRID,(char *)page + offset + lenToRID + sizeof(RID),sizeof(RID));
 
                             data.numRIDs--;
+                            memcpy((char*)page + offset, &data, sizeof(DataDesc));
                             nodeDesc.size -= sizeof(RID);
+
+                            // if no more rids exist, also delete page
+                            if (data.numRIDs == 0) {
+                                memmove((char*)page + offset, (char*)page + offset + sizeof(DataDesc) + data.keySize, sizeof(DataDesc) + data.keySize);
+                                nodeDesc.size -= sizeof(DataDesc) + data.keySize;
+                            }
+
+                            // write to disk
+                            memcpy((char*)page + (PAGE_SIZE - sizeof(NodeDesc)), &nodeDesc, sizeof(NodeDesc));
+                            ixFileHandle.writePage(root, page);
+
                             free(data.key);
                             free(page);
                             return SUCCESS;
@@ -554,7 +706,7 @@ RC IndexManager::shiftTree(IXFileHandle &ixfileHandle, Attribute &attribute,
                 // get next data
                 offset += data.keySize + (data.numRIDs * sizeof(RID) + sizeof(DataDesc));
             }
-            free(data.key);
+            //free(data.key);
             free(page);
             return FAILURE;
         }
@@ -669,6 +821,12 @@ RC IndexManager::shiftTree(IXFileHandle &ixfileHandle, Attribute &attribute,
                           const void *lowKey, const void *highKey,
                           bool lowKeyInclusive, bool highKeyInclusive,
                           IX_ScanIterator &ix_ScanIterator) {
+
+        // check if exists (append count == 0)
+        if (ixFileHandle.ixAppendPageCounter == 0) {
+            return FAILURE;
+        }
+
         ix_ScanIterator.ixFileHandle = &ixFileHandle;
         ix_ScanIterator.attribute = attribute;
         ix_ScanIterator.lowKey = (char *)lowKey;
@@ -676,11 +834,11 @@ RC IndexManager::shiftTree(IXFileHandle &ixfileHandle, Attribute &attribute,
         ix_ScanIterator.lowKeyInclusive = lowKeyInclusive;
         ix_ScanIterator.highKeyInclusive = highKeyInclusive;
 
-        IndexManager im = IndexManager::instance();
+        //IndexManager im = IndexManager::instance();
 
         // get low and high keys
         if (lowKey != nullptr) {
-            int length = im.keySize(attribute, lowKey);
+            int length = keySize(attribute, lowKey);
             ix_ScanIterator.lowKey = malloc(length);
             memcpy(&ix_ScanIterator.lowKey, lowKey, length);
         } else {
@@ -692,20 +850,20 @@ RC IndexManager::shiftTree(IXFileHandle &ixfileHandle, Attribute &attribute,
         }
 
         if (highKey != nullptr) {
-            int length = im.keySize(attribute, highKey);
+            int length = keySize(attribute, highKey);
             ix_ScanIterator.highKey = malloc(length);
-            memcpy(&ix_ScanIterator.highKey, highKey, length);
+            memcpy(ix_ScanIterator.highKey, highKey, length);
         } else {
             // set equal to positive infinity
             ix_ScanIterator.highNull = true;
             float pos_inf = POS_INF;
             ix_ScanIterator.highKey = malloc(sizeof(float));
-            memcpy(&ix_ScanIterator.highKey, &pos_inf, sizeof(float));
+            memcpy(ix_ScanIterator.highKey, &pos_inf, sizeof(float));
         }
 
         // read root page
         // store first pageNum and <key,rid> pair
-        PageNum root = im.findRoot(ixFileHandle);
+        PageNum root = findRoot(ixFileHandle);
         ix_ScanIterator.currPage = root;
 
         if (ix_ScanIterator.lowNull) {
@@ -726,7 +884,47 @@ RC IndexManager::shiftTree(IXFileHandle &ixfileHandle, Attribute &attribute,
             }
         } else {
             ix_ScanIterator.currPage =
-                    im.checkChild(ixFileHandle, attribute, lowKey, root);
+                    checkChild(ixFileHandle, attribute, lowKey, root);
+        }
+
+        ix_ScanIterator.currData = 0;
+        ix_ScanIterator.currRID = 0;
+
+        // found page, now find  first data if lowkey is not NULL
+        if (!ix_ScanIterator.lowNull) {
+            void *page = malloc(PAGE_SIZE);
+            ixFileHandle.readPage(ix_ScanIterator.currPage, page);
+            NodeDesc nodeDesc;
+            memcpy(&nodeDesc, (char *) page + (PAGE_SIZE - sizeof(NodeDesc)), sizeof(NodeDesc));
+
+            DataDesc data;
+            while (ix_ScanIterator.currData < nodeDesc.size) {
+                memcpy(&data, (char *) page + ix_ScanIterator.currData, sizeof(DataDesc));
+                void *checkKey = malloc(data.keySize);
+                memcpy(&checkKey, (char *) page + ix_ScanIterator.currData + sizeof(DataDesc), data.keySize);
+
+                // if inclusive, check equal (and greater for safety), else greater
+                int comp = compareKey(attribute, checkKey, lowKey);
+                if (ix_ScanIterator.lowKeyInclusive) {
+                    // included
+                    if (comp >= 0) {
+                        free(checkKey);
+                        return SUCCESS;
+                    }
+                } else {
+                    // not included
+                    if (comp > 0) {
+                        free(checkKey);
+                        return SUCCESS;
+                    }
+                }
+
+                // go to next data offset
+                ix_ScanIterator.currData += sizeof(DataDesc) + data.keySize + (data.numRIDs * sizeof(RID));
+            }
+
+            free(page);
+            return FAILURE;
         }
 
         return SUCCESS;
@@ -940,11 +1138,95 @@ type = (type == KEYS) ? CHILD : KEYS;
         // start from saved <key,rid>
         // go until highKey
 
-        if (currKey == -1 || currRID == -1) {
+//        if (currKey == -1 || currRID == -1 || currData == -1) {
+//            // scan never called to initialize
+//            return FAILURE;
+//        }
+
+        if (currPage == INVALID_PAGE) {
+            return IX_EOF;
         }
+
+        void *page = malloc(PAGE_SIZE);
+
+        // read current page
+        if (ixFileHandle->readPage(currPage, page) == FAILURE) { return FAILURE; }
+
+        NodeDesc nodeDesc;
+        memcpy(&nodeDesc, (char*)page + (PAGE_SIZE - sizeof(NodeDesc)), sizeof(NodeDesc));
+
+        if (nodeDesc.type != LEAF) { return FAILURE; }
+
+//        DataDesc data;
+//        unsigned offset = currData + currRID;
+//        while(offset < nodeDesc.size) {
+//            // get data descriptor
+//            memcpy(&data, (char*)page + currData, sizeof(DataDesc));
+//            memcpy(&key, (char*)page + offset + sizeof(DataDesc), data.keySize);
+//
+//            if (IM.compareKey(attribute, key, highKey) >= 0) {
+//                free(page);
+//                return IX_EOF;
+//            }
+//
+//            // copy RID
+//            memcpy(&rid, (char*)page + currData + data.keySize + sizeof(DataDesc) + (currRID * sizeof(RID)), sizeof(RID));
+//
+//
+//        }
+//
+//        // move to next page
+//        currPage = nodeDesc.next;
+//        if (currPage == INVALID_PAGE) {
+//            free(page);
+//            return IX_EOF;
+//        }
+//
+//        currData = 0;
+//        currRID = 0;
+
+        // get data descriptor and key value
+        DataDesc data;
+        memcpy(&data, (char*)page + currData, sizeof(DataDesc));
+        memcpy(key, (char*)page + currData + sizeof(DataDesc), data.keySize);
+
+        // if key is >= high key -> no entries left to satisfy range
+        if (highKeyInclusive && IM.compareKey(attribute, key, highKey) > 0) {
+                free(page);
+                return IX_EOF;
+            }
+
+        if (!highKeyInclusive && IM.compareKey(attribute, key, highKey) >= 0) {
+            free(page);
+            return IX_EOF;
+        }
+
+        // copy RID
+        memcpy(&rid, (char*)page + currData + data.keySize + sizeof(DataDesc) + (currRID * sizeof(RID)), sizeof(RID));
+
+        // move to next RID, check if spills to next key
+        currRID++;
+        if (currRID >= data.numRIDs) {
+            // move to next key
+            currData += sizeof(DataDesc) + data.keySize + (data.numRIDs * sizeof(RID));
+            currRID = 0;
+        }
+
+        // check if data is at end of page
+        if (currData >= nodeDesc.size) {
+            currPage = nodeDesc.next;
+            currData = 0;
+            currRID = 0;
+        }
+
+        return SUCCESS;
     }
 
-    RC IX_ScanIterator::close() { return -1; }
+    RC IX_ScanIterator::close() {
+        //free(lowKey);
+        //free(highKey);
+        return SUCCESS;
+    }
 
     IXFileHandle::IXFileHandle() {
         ixReadPageCounter = 0;

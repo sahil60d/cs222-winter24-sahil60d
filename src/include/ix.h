@@ -11,12 +11,13 @@
 #define IX_EOF (-1) // end of the index scan
 #define LEAF 1
 #define NON_LEAF 2
-#define INVALID_PAGE -1
-#define UPPER_THRES PAGE_SIZE - sizeof(NodeDesc)
+#define INVALID_PAGE (-1)
+#define UPPER_THRES (PAGE_SIZE - sizeof(NodeDesc))
 #define POS_INF std::numeric_limits<float>::infinity()
-#define NEG_INF -std::numeric_limits<float>::infinity()
+#define NEG_INF (-std::numeric_limits<float>::infinity())
+#define IM IndexManager::instance()
 
-//#define DIR_SIZE                                                               \
+//#define DIR_SIZE                                   #include "src/include/ix.h"                            \
   PAGE_SIZE / sizeof(PageNum) // 1024, number of PageNums that can be stored in
 // the directory
 
@@ -90,6 +91,12 @@ namespace PeterDB {
         RC printBTree(IXFileHandle &ixFileHandle, const Attribute &attribute,
                       std::ostream &out) const;
 
+        // Compare 2 keys:
+        //    a = b -> return = 0
+        //    a > b -> return > 0
+        //    a < b -> return < 0
+        int compareKey(const Attribute &attribute, const void *A, const void *B);
+
     protected:
         IndexManager() = default;  // Prevent construction
         ~IndexManager() = default; // Prevent unwanted destruction
@@ -120,12 +127,6 @@ namespace PeterDB {
         // Create new page (node), can be leaf or non-leaf
         PageNum newNode(IXFileHandle &ixfileHandle, NodeType type);
 
-        // Compare 2 keys:
-        //    a = b -> return = 0
-        //    a > b -> return > 0
-        //    a < b -> return < 0
-        int compareKey(const Attribute &attribute, const void *A, const void *B);
-
         // Update page that points to root node with new pageNum
         RC newRoot(IXFileHandle &ixfileHandle, PageNum pageNum);
 
@@ -133,9 +134,11 @@ namespace PeterDB {
         RC printKey(const Attribute &attribute, const void *key,
                     std::ostream &out) const;
 
+        // Recursively Prints the B Tree
         RC printBTreeNode(IXFileHandle &ixFileHandle, const Attribute &attribute,
                           std::ostream &out, PageNum pageNum) const;
 
+        // get child pagae num
         PageNum checkChild(IXFileHandle &ixFileHandle, const Attribute &attribute,
                            const void *key, PageNum pageNum);
     };
@@ -149,9 +152,10 @@ namespace PeterDB {
         bool highKeyInclusive;
         bool lowNull = false;
         bool highNull = false;
-        // IndexManager &im;
+        //IndexManager &im;
         PageNum currPage;
         unsigned currKey = -1;
+        unsigned currData = -1;
         unsigned currRID = -1;
 
         // Constructor
