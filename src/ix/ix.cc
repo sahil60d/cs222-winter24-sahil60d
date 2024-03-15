@@ -214,12 +214,12 @@ namespace PeterDB {
             // Move data
             memcpy((char *)newPage, (char *)page + offset, newNodeDesc.size);
 
-            // get first key from new node
+            // get first key from new node -> convert from data struct to key struct to be pushed up to index node
             DataDesc firstKey;
             memcpy(&firstKey, (char *)newPage, sizeof(DataDesc));
 
             keyDesc.keySize = firstKey.keySize;
-            memcpy(keyDesc.key, (char *)newPage + (sizeof(DataDesc) - sizeof(void*)), keyDesc.keySize);
+            memcpy(keyDesc.key, (char *)newPage + (sizeof(DataDesc)), keyDesc.keySize);
             keyDesc.left = pageNum;   // orginal node
             keyDesc.right = freeNode; // new split node
 
@@ -229,7 +229,7 @@ namespace PeterDB {
 
             // check if entry should go in new split node
             // if entry key is greater than new nodes first key, update nodeDesc and
-            // page to represet the split node
+            // page to represent the split node
             if (compareKey(attribute, key, keyDesc.key) >= 0) {
                 pageNum = freeNode;
                 memcpy(page, newPage, PAGE_SIZE); // copy page
@@ -337,7 +337,7 @@ namespace PeterDB {
             // update page info
             nodeDesc.size +=
                     newData.keySize + (newData.numRIDs * sizeof(RID) + sizeof(DataDesc));
-            memcpy((char *)page + PAGE_SIZE - sizeof(NodeDesc), &nodeDesc,
+            memcpy((char *)page + (PAGE_SIZE - sizeof(NodeDesc)), &nodeDesc,
                    sizeof(NodeDesc));
         }
 
@@ -363,7 +363,11 @@ namespace PeterDB {
         while (1) {
             memcpy(&currKey, (char *)page + offset, sizeof(KeyDesc));
             currKey.key = malloc(currKey.keySize);
-            memcpy(currKey.key, (char *)page + sizeof(KeyDesc), currKey.keySize);
+            memcpy(currKey.key, (char *)page + sizeof(KeyDesc) + offset, currKey.keySize);
+
+            if (offset >= 2000) {
+                int h = 0;
+            }
 
             // compare entry key to current key
             // <0 -> left node
@@ -379,6 +383,7 @@ namespace PeterDB {
             }
 
             if ((offset + (sizeof(KeyDesc) + currKey.keySize)) == nodeDesc.size) {
+                offset += sizeof(KeyDesc) + currKey.keySize;
                 currPage = currKey.right;
                 break;
             }
@@ -430,14 +435,14 @@ namespace PeterDB {
                 }
 
                 // find/create new page for split
-                //PageNum freeNode = findFree(ixfileHandle);
+                PageNum freeNode = findFree(ixfileHandle);
 
                 // add split data to new node
                 // create new node descriptor
                 NodeDesc newNodeDesc;
                 newNodeDesc.type = NON_LEAF;
                 newNodeDesc.size = nodeDesc.size - off;
-                newNodeDesc.next = findFree(ixfileHandle);
+                //newNodeDesc.next = findFree(ixfileHandle);
 
                 // update original node descriptor
                 nodeDesc.size = off;
@@ -453,7 +458,7 @@ namespace PeterDB {
 
                 memcpy(&keyDesc, (char*)newNode, sizeof(KeyDesc));
                 keyDesc.left = pageNum;
-                keyDesc.right = newNodeDesc.next;
+                keyDesc.right = freeNode;
 
                 //keyDesc.keySize = firstKey.keySize;
                 memcpy(keyDesc.key, (char*)newNode + sizeof(KeyDesc), keyDesc.keySize);
@@ -463,8 +468,8 @@ namespace PeterDB {
                 newNodeDesc.size -= sizeof(KeyDesc) + keyDesc.keySize;
 
                 // write pages
-                ixfileHandle.writePage(pageNum, page);
-                ixfileHandle.writePage(newNodeDesc.next, newNode);
+                //ixfileHandle.writePage(pageNum, page);
+                //ixfileHandle.writePage(freeNode, newNode);
 
                 // node has been split, determine which node and where to enter key based on offset value
                 // offset < nodeDesc.size -> original node, put it where it is
@@ -474,7 +479,7 @@ namespace PeterDB {
                     offset -= nodeDesc.size;
 
                     // add key
-                    memmove((char*) newNode + offset + sizeof(KeyDesc) + newKeyDesc.keySize, (char*)newNode + offset, nodeDesc.size - offset);
+                    memmove((char*) newNode + offset + sizeof(KeyDesc) + newKeyDesc.keySize, (char*)newNode + offset, newNodeDesc.size - offset);
                     memcpy((char*)newNode + offset, &newKeyDesc, sizeof(KeyDesc));
                     memcpy((char*)newNode + offset + sizeof(KeyDesc), newKeyDesc.key, newKeyDesc.keySize);
 
@@ -489,7 +494,10 @@ namespace PeterDB {
                     memcpy((char*)newNode + (PAGE_SIZE - sizeof(NodeDesc)), &nodeDesc, sizeof(NodeDesc));
 
                     // write page
-                    ixfileHandle.writePage(nodeDesc.next, newNode);
+                    //ixfileHandle.writePage(freeNode, newNode);
+                    ixfileHandle.writePage(pageNum, page);
+                    ixfileHandle.writePage(freeNode, newNode);
+
                 } else {
                     memmove((char*)page + offset + newKeyDesc.keySize + sizeof(KeyDesc), (char*)page + offset, nodeDesc.size - offset);
                     memcpy((char*)page + offset, &newKeyDesc, sizeof(KeyDesc));
@@ -506,7 +514,9 @@ namespace PeterDB {
                     memcpy((char*)page + (PAGE_SIZE - sizeof(NodeDesc)), &nodeDesc, sizeof(NodeDesc));
 
                     // write page
+                    //ixfileHandle.writePage(pageNum, page);
                     ixfileHandle.writePage(pageNum, page);
+                    ixfileHandle.writePage(freeNode, newNode);
                 }
 
             } else {

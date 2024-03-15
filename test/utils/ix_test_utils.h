@@ -205,14 +205,17 @@ namespace PeterDBTesting {
                                       T salt = 2, T fixedKey = 0) {
 
             for (unsigned i = 0; i < numOfTuples; i++) {
-                if (i == 10658) {
-                    int p = 0;
-                }
+
                 T value = i + seed;
                 rid.pageNum = (unsigned) (value * salt + seed) % INT_MAX;
                 rid.slotNum = (unsigned) (value * salt * seed + seed) % SHRT_MAX;
                 rids.emplace_back(rid);
                 T key = fixedKey == 0 ? value : fixedKey;
+
+                if (key == 23275 || key == 23276 || key == 23347 || key == 23348 || key == 23349 || key == 23421) {
+                    int p = 0;
+                }
+
                 ASSERT_EQ(ix.insertEntry(ixFileHandle, attr, &key, rid), success)
                                             << "indexManager::insertEntry() should succeed.";
             }

@@ -240,6 +240,9 @@ namespace PeterDBTesting {
         while (ix_ScanIterator.getNextEntry(rid, &key) == success) {
             validateUnorderedRID(key, (int) (count + seed), ridsCopy);
             count++;
+            if (count == 10803) {
+                int y = 0;
+            }
             if (count % 5000 == 0) {
                 GTEST_LOG_(INFO) << count << " - Returned rid: " << rid.pageNum << " " << rid.slotNum;
             }
