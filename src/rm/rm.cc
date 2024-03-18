@@ -586,6 +586,8 @@ namespace PeterDB {
 
     // QE IX related
     RC RelationManager::createIndex(const std::string &tableName, const std::string &attributeName){
+        // Create
+
         return -1;
     }
 

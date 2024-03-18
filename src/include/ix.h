@@ -4,6 +4,7 @@
 #include <limits>
 #include <string>
 #include <vector>
+//#include <cmath>
 
 #include "pfm.h"
 #include "rbfm.h" // for some type declarations only, e.g., RID and Attribute
@@ -29,7 +30,7 @@ namespace PeterDB {
     typedef enum { Split_OP, No_OP, Error_OP } TreeOp;
 
 // Information about the Node (page)
-    typedef struct {
+    typedef struct NodeDesc {
         NodeType type;               // Leaf=1, Non-Leaf=2
         PageSize size;               // size doesn't include Node Descriptor
         PageNum prev = INVALID_PAGE; // previous leaf node in linked list

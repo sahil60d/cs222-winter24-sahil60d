@@ -93,7 +93,7 @@ namespace PeterDB {
         // Insert tuple in Columns
         RC insertColumns(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor, RID &rid, const std::string &columnName, const int &columnType, const int &columnLength, const int &columnPosition);
 
-        // Check is table name matchs TABLES/COLUMNS
+        // Check if table name matches TABLES/COLUMNS
         RC checkName(const std::string &tableName);
 
         // Create record description for any table

@@ -610,6 +610,10 @@ namespace PeterDBTesting {
             memset(key, 0, 1004);
             prepareKeyAndRid(i, key, rid);
 
+            if (i == 96) {
+                int r = 0;
+            }
+
             ASSERT_EQ(ix.insertEntry(ixFileHandle, empNameAttr, &key, rid), success)
                                         << "indexManager::insertEntry() should succeed.";
 

@@ -180,6 +180,7 @@ namespace PeterDB {
         if (fclose(fptr) != 0) {
             return FAILURE;
         }
+        fptr = nullptr;
         return SUCCESS;
     }
 

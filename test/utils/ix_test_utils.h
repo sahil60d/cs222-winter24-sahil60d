@@ -212,7 +212,7 @@ namespace PeterDBTesting {
                 rids.emplace_back(rid);
                 T key = fixedKey == 0 ? value : fixedKey;
 
-                if (key == 23275 || key == 23276 || key == 23347 || key == 23348 || key == 23349 || key == 23421) {
+                if (i == 100000 || i == 500000 || i == 750000) {
                     int p = 0;
                 }
 
