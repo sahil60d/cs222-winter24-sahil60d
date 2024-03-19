@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "src/include/rbfm.h"
+#include "src/include/ix.h"
 
 namespace PeterDB {
 #define RM_EOF (-1)  // end of a scan operator
@@ -35,6 +36,9 @@ namespace PeterDB {
         RC getNextEntry(RID &rid, void *key);    // Get next matching entry
         RC close();                              // Terminate index scan
 
+        IndexManager *im;
+        IXFileHandle fileHandle;
+        IX_ScanIterator ixs;
     };
 
     // Relation Manager
@@ -46,6 +50,7 @@ namespace PeterDB {
         bool catExists = false;
         std::string tables = "Tables";
         std::string columns = "Columns";
+        std::string indices = "Indices";
 
         RC createCatalog();
 
@@ -101,6 +106,18 @@ namespace PeterDB {
 
         // Convert string to formatted varChar
         RC formatStr(const std::string &inBuffer, void* outBuffer);
+
+        // Insert tuple in Indices
+        RC insertIndex(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor, RID &rid, const std::string &tableName, const int tableID, const std::string colName, const int colID);
+
+        // Create Index attrbute desc
+        RC indexDesc(std::vector<Attribute> &recordDescriptor);
+
+        // Data to string
+        RC dataToStr(void *data, std::string &str);
+
+        // Checks if index already exists in indicies file
+        RC checkIndex(const std::string &tableName, const std::string &attributeName);
         /********************************/
         // Extra credit work (10 points)
         RC addAttribute(const std::string &tableName, const Attribute &attr);
@@ -129,6 +146,7 @@ namespace PeterDB {
 
     private:
         RecordBasedFileManager *rbfm;
+        IndexManager *im;
     };
 
 } // namespace PeterDB

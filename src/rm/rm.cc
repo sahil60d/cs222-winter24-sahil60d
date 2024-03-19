@@ -27,22 +27,28 @@ namespace PeterDB {
         // create tables and columns file
         RC rc1 = rbfm->createFile(tables);
         RC rc2 = rbfm->createFile(columns);
-        if (rc1 == FAILURE || rc2 == FAILURE) {return FAILURE;}
+        RC rc3 = rbfm->createFile(indices);
+        if (rc1 == FAILURE || rc2 == FAILURE || rc3 == FAILURE) {return FAILURE;}
 
         // open files
         RID tableRID;
         RID columnRID;
+        RID indexRID;
         FileHandle tableFileHandle;
         FileHandle columnFileHandle;
+        FileHandle indexFileHandle;
         rc1 = rbfm->openFile(tables, tableFileHandle);
         rc2 = rbfm->openFile(columns, columnFileHandle);
-        if (rc1 == FAILURE || rc2 == FAILURE) {return FAILURE;}
+        rc3 = rbfm->openFile(indices, indexFileHandle);
+        if (rc1 == FAILURE || rc2 == FAILURE || rc3 == FAILURE) {return FAILURE;}
 
         // insert tuples
         std::vector<Attribute> tableRecordDescription;
         tableDesc(tableRecordDescription);
         std::vector<Attribute> columnRecordDescription;
         columnDesc(columnRecordDescription);
+        std::vector<Attribute> indexRecordDescription;
+        indexDesc(indexRecordDescription);
 
         tableCount++;
         insertTables(tableFileHandle, tableRecordDescription, tableRID, "Tables", "Tables");
@@ -56,10 +62,17 @@ namespace PeterDB {
             insertColumns(columnFileHandle, columnRecordDescription, columnRID, columnRecordDescription[i].name, columnRecordDescription[i].type, columnRecordDescription[i].length, i+1);
         }
 
+        tableCount++;
+        insertTables(tableFileHandle, tableRecordDescription, tableRID, "Indices", "Indices");
+        for (int i = 0; i < indexRecordDescription.size(); i++) {
+            insertColumns(columnFileHandle, columnRecordDescription, columnRID, indexRecordDescription[i].name, indexRecordDescription[i].type, indexRecordDescription[i].length, i+1);
+        }
+
         // close files
         rc1 = rbfm->closeFile(tableFileHandle);
         rc2 = rbfm->closeFile((columnFileHandle));
-        if (rc1 == FAILURE || rc2 == FAILURE) {return FAILURE;}
+        rc3 = rbfm->closeFile(indexFileHandle);
+        if (rc1 == FAILURE || rc2 == FAILURE || rc3 == FAILURE) {return FAILURE;}
 
         catExists = true;
         return SUCCESS;
@@ -72,7 +85,8 @@ namespace PeterDB {
 
         RC rc1 = rbfm->destroyFile(tables);
         RC rc2 = rbfm->destroyFile(columns);
-        if (rc1 == FAILURE || rc2 == FAILURE) {return FAILURE;}
+        RC rc3 = rbfm->destroyFile(indices);
+        if (rc1 == FAILURE || rc2 == FAILURE || rc3 == FAILURE) {return FAILURE;}
         tableCount = 0;
         catExists = false;
 
@@ -409,6 +423,39 @@ namespace PeterDB {
         return SUCCESS;
     }
 
+    RC RelationManager::indexDesc(std::vector<Attribute> &recordDescriptor) {
+        Attribute   tableId,
+                    tableName,
+                    columnPosition,
+                    columnName;
+
+        // table id
+        tableId.name = "table-id";
+        tableId.type = TypeInt;
+        tableId.length = sizeof(int);
+        recordDescriptor.push_back(tableId);
+
+        // table name
+        tableName.name = "table-name";
+        tableName.type = TypeVarChar;
+        tableName.length = VARCHAR_SIZE;
+        recordDescriptor.push_back(tableName);
+
+        // column position
+        columnPosition.name = "column-position";
+        columnPosition.type = TypeInt;
+        columnPosition.length = sizeof(int);
+        recordDescriptor.push_back(columnPosition);
+
+        // column name
+        columnName.name = "column-name";
+        columnName.type = TypeVarChar;
+        columnName.length = VARCHAR_SIZE;
+        recordDescriptor.push_back(columnName);
+
+        return SUCCESS;
+    }
+
     RC RelationManager::insertTables(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor, RID &rid, const std::string &tableName, const std::string &fileName) {
         int tableNameLen = tableName.length();
         int fileNameLen = fileName.length();
@@ -474,7 +521,7 @@ namespace PeterDB {
     }
 
     RC RelationManager::checkName(const std::string &tableName) {
-        if (tableName == tables || tableName == columns) {
+        if (tableName == tables || tableName == columns || tableName == indices) {
             return FAILURE;
         }
         return SUCCESS;
@@ -586,13 +633,203 @@ namespace PeterDB {
 
     // QE IX related
     RC RelationManager::createIndex(const std::string &tableName, const std::string &attributeName){
-        // Create
+        // Check if tableName and attributeName are valid
+        FileHandle fileHandle;
+        if (rbfm->openFile(tableName, fileHandle) == FAILURE) { return FAILURE; }   // fails if table doesn't exist
 
-        return -1;
+        // get attributes
+        std::vector<Attribute> recordDescriptor;
+        getAttributes(tableName, recordDescriptor);
+
+        // check if attribute exists
+        bool found = false;
+        int attributePosition;
+        for (attributePosition = 0; attributePosition < recordDescriptor.size(); attributePosition++) {
+            if (recordDescriptor[attributePosition].name == attributeName) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) { return FAILURE; }
+        // check if already in indices file
+        int l = tableName.length();
+        void *value = malloc(l);
+        memset(value, 0, l);
+        formatStr(tableName, value);
+
+        RM_ScanIterator rmsi_index;
+        std::vector<std::string> attrs;
+        std::string attrName1 = "table-id";
+        std::string attrName2 = "column-name";
+        attrs.push_back(attrName1);
+        attrs.push_back(attrName2);
+        scan(indices, "table-name", EQ_OP, value, attrs, rmsi_index);
+
+        RID indexRID;
+        found = false;
+        void *data = malloc(PAGE_SIZE);
+        //void *name = malloc(PAGE_SIZE);
+        int tableID;
+        while(rmsi_index.getNextTuple(indexRID, data) != RM_EOF) {
+            memcpy(&tableID, (char*)data + sizeof(char), sizeof(int));
+            // check if index is already in file,
+            std::string attr;
+            dataToStr(((char*)data + sizeof(int)), attr);
+            if (attr == attributeName) {
+                found = true;
+                break;
+            }
+        }
+
+        if(found) {
+            free(value);
+            free(data);
+            return FAILURE;
+        }
+
+        // create the index file
+        std::string indexName = tableName + "_" + attributeName;
+        if (rbfm->createFile(indexName) == FAILURE) { return FAILURE; }
+
+        // add file to indices file
+        FileHandle indexFileHandle;
+        if (rbfm->openFile(indices, indexFileHandle) == FAILURE) { return FAILURE; }
+
+        RID rid;
+        std::vector<Attribute> indexRecordDescriptor;
+        if (insertIndex(indexFileHandle, indexRecordDescriptor, rid, tableName, tableID, attributeName, attributePosition) == FAILURE) { return FAILURE; }
+
+        rbfm->closeFile(indexFileHandle);
+
+        // add nodes to index file b+ tree
+        FileHandle insertFileHandle;
+        if (rbfm->openFile(indexName, insertFileHandle) == FAILURE) { return FAILURE; }
+        RM_ScanIterator rmsi;
+        Attribute attr = recordDescriptor[attributePosition];
+        std::vector<std::string> attrNames;
+        attrNames.push_back(attr.name);
+        scan(tableName, attr.name, NO_OP, NULL, attrNames, rmsi);
+
+        void* page = malloc(PAGE_SIZE);
+        RID indexRid;
+
+        IXFileHandle fh;
+        im->openFile(indexName, fh);
+
+        while (rmsi.getNextTuple(indexRid, page) != RM_EOF) {
+            im->insertEntry(fh, attr, page, indexRid);
+        }
+
+        rmsi.close();
+        free(page);
+        im->closeFile(fh);
+
+        return SUCCESS;
+    }
+
+    RC RelationManager::dataToStr(void *data, std::string &str) {
+        int size;
+        memcpy(&size, (char*)data + sizeof(char), sizeof(int));
+        str.assign(((char*)data + sizeof(char) + sizeof(int)), size);
+        return SUCCESS;
+    }
+
+//    RC RelationManager::checkIndex(const std::string &tableName, const std::string &attributeName) {
+//        void *page = malloc(PAGE_SIZE);
+//        FileHandle fileHandle;
+//        if (rbfm->openFile(tableName, fileHandle) == FAILURE) { return FAILURE; }
+//
+//        std::vector<Attribute> recordDescriptor;
+//        createDesc(tableName, recordDescriptor);
+//
+//        RID rid;
+//        void *buffer = malloc(PAGE_SIZE);
+//        if (rbfm->readRecord(fileHandle, recordDescriptor, &rid, buffer) == FAILURE) {
+//            free(buffer);
+//            return FAILURE;
+//        } else {
+//            free(buffer);
+//            return SUCCESS;
+//        }
+//    }
+
+    RC RelationManager::insertIndex(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor, RID &rid, const std::string &tableName, const int tableID, const std::string colName, const int colPos) {
+        int tableNameLen = tableName.length();
+        int colNameLen = colName.length();
+        int dataSize = sizeof(char) + (sizeof(int) * 4) + tableNameLen + colNameLen;
+        void *data = malloc(dataSize);
+        memset(data, 0, dataSize);
+
+        int offset = 0;
+        char nullIndicator = 0b00000000;
+        memcpy(data, &nullIndicator, sizeof(char));
+        offset += sizeof(char);
+        memcpy((char *) data + offset, &tableID, sizeof(int));
+        offset += sizeof(int);
+        memcpy((char *) data + offset, &tableNameLen, sizeof(int));
+        offset += sizeof(int);
+        memcpy((char *) data + offset, tableName.c_str(), tableNameLen);
+        offset += tableNameLen;
+        memcpy((char*)data + offset, &colPos, sizeof(int));
+        offset += sizeof(int);
+        memcpy((char *) data + offset, &colNameLen, sizeof(int));
+        offset += sizeof(int);
+        memcpy((char *) data + offset, colName.c_str(), colNameLen);
+
+        if (rbfm->insertRecord(fileHandle, recordDescriptor, data, rid) == FAILURE) {
+            free(data);
+            return FAILURE;
+        }
+
+        free(data);
+        return SUCCESS;
     }
 
     RC RelationManager::destroyIndex(const std::string &tableName, const std::string &attributeName){
-        return -1;
+        std::string indexName = tableName + "_" + attributeName;
+
+        // Check if tableName and attributeName are valid
+        FileHandle fileHandle;
+        if (rbfm->openFile(tableName, fileHandle) == FAILURE) { return FAILURE; }   // fails if table doesn't exist
+
+        // get attributes
+        std::vector<Attribute> recordDescriptor;
+        getAttributes(tableName, recordDescriptor);
+
+        // check if attribute exists
+        bool found = false;
+        int attributePosition;
+        for (attributePosition = 0; attributePosition < recordDescriptor.size(); attributePosition++) {
+            if (recordDescriptor[attributePosition].name == attributeName) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) { return FAILURE; }
+
+        // get RID
+        int l = tableName.length();
+        void *value = malloc(l);
+        memset(value, 0, l);
+        formatStr(tableName, value);
+
+        RM_ScanIterator rmsi_index;
+        std::vector<std::string> attrs;
+        std::string attrName1 = "table-id";
+        attrs.push_back(attrName1);
+        scan(indices, "table-name", EQ_OP, value, attrs, rmsi_index);
+
+        RID indexRID;
+        found = false;
+        void *data = malloc(PAGE_SIZE);
+        rmsi_index.getNextTuple(indexRID, data);
+        free(data);
+
+        if (deleteTuple(indices, indexRID) == FAILURE) { return FAILURE; }
+
+        if (im->destroyFile(indexName) == FAILURE) { return FAILURE; }
+
+        return SUCCESS;
     }
 
     // indexScan returns an iterator to allow the caller to go through qualified entries in index
@@ -603,7 +840,28 @@ namespace PeterDB {
                  bool lowKeyInclusive,
                  bool highKeyInclusive,
                  RM_IndexScanIterator &rm_IndexScanIterator){
-        return -1;
+        std::string indexName = tableName + "_" + attributeName;
+
+        if (im->openFile(indexName, rm_IndexScanIterator.fileHandle) == FAILURE) { return FAILURE; }
+
+        Attribute attr;
+        std::vector<Attribute> recordDescriptor;
+        createDesc(tableName, recordDescriptor);
+
+        int attrPos;
+        for (attrPos = 0; attrPos < recordDescriptor.size(); attrPos++) {
+            if (recordDescriptor[attrPos].name == attributeName) {
+                attr = recordDescriptor[attrPos];
+                break;
+            }
+        }
+
+        if (attrPos == recordDescriptor.size()) {
+            im->closeFile(rm_IndexScanIterator.fileHandle);
+            return FAILURE;
+        }
+
+        return im->scan(rm_IndexScanIterator.fileHandle, attr, lowKey, highKey, lowKeyInclusive, highKeyInclusive, rm_IndexScanIterator.ixs);
     }
 
 
@@ -612,11 +870,13 @@ namespace PeterDB {
     RM_IndexScanIterator::~RM_IndexScanIterator() = default;
 
     RC RM_IndexScanIterator::getNextEntry(RID &rid, void *key){
-        return -1;
+        return ixs.getNextEntry(rid, key);
     }
 
     RC RM_IndexScanIterator::close(){
-        return -1;
+        ixs.close();
+        im->closeFile(fileHandle);
+        return SUCCESS;
     }
 
 } // namespace PeterDB

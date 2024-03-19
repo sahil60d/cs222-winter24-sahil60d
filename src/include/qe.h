@@ -169,6 +169,18 @@ namespace PeterDB {
 
         // For attribute in std::vector<Attribute>, name it as rel.attr
         RC getAttributes(std::vector<Attribute> &attrs) const override;
+
+    private:
+        Iterator *iter;
+        RecordBasedFileManager *rbfm;
+        std::vector<Attribute> recordDescriptor;
+        void *condition;
+        std::string attrName;
+        AttrType type;
+        CompOp op;
+        void *val;
+        int attributePosition;
+
     };
 
     class Project : public Iterator {
@@ -182,6 +194,13 @@ namespace PeterDB {
 
         // For attribute in std::vector<Attribute>, name it as rel.attr
         RC getAttributes(std::vector<Attribute> &attrs) const override;
+
+    private:
+        Iterator *iter;
+        RecordBasedFileManager *rbfm;
+        std::vector<Attribute> recordDescriptor;
+        std::vector<std::string> projectAttrs;
+        void *val;
     };
 
     class BNLJoin : public Iterator {
