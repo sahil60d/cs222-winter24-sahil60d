@@ -201,6 +201,8 @@ namespace PeterDB {
         std::vector<Attribute> recordDescriptor;
         std::vector<std::string> projectAttrs;
         void *val;
+
+        RC readAttr(const std::string &attributeName, void *attributeData);
     };
 
     class BNLJoin : public Iterator {
@@ -219,6 +221,17 @@ namespace PeterDB {
 
         // For attribute in std::vector<Attribute>, name it as rel.attr
         RC getAttributes(std::vector<Attribute> &attrs) const override;
+
+    private:
+        Iterator *lhsIter;
+        TableScan *rhsIter;
+        Condition condition;
+        unsigned numPages;
+        std::vector<Attribute> lhsAttrs;
+        std::vector<Attribute> rhsAttrs;
+        void *lhsTuple;
+        void *rhsTuple;
+        bool first;
     };
 
     class INLJoin : public Iterator {
@@ -235,6 +248,17 @@ namespace PeterDB {
 
         // For attribute in std::vector<Attribute>, name it as rel.attr
         RC getAttributes(std::vector<Attribute> &attrs) const override;
+
+    private:
+        //RecordBasedFileManager *rbfm;
+        Iterator *lhsIter;
+        IndexScan *rhsIter;
+        Condition condition;
+        std::vector<Attribute> lhsAttrs;
+        std::vector<Attribute> rhsAttrs;
+        void *lhsTuple;
+        void *rhsTuple;
+        bool first;
     };
 
     // 10 extra-credit points
@@ -281,6 +305,22 @@ namespace PeterDB {
         // E.g. Relation=rel, attribute=attr, aggregateOp=MAX
         // output attrName = "MAX(rel.attr)"
         RC getAttributes(std::vector<Attribute> &attrs) const override;
+
+    private:
+        Iterator *iter;
+        Attribute aggAttr;
+        AggregateOp op;
+        std::vector<Attribute> recordDescriptor;
+        unsigned attrPos;
+        bool found;
+
+        // Helpers
+        RC getMIN(void *data);
+        RC getMAX(void *data);
+        RC getCOUNT(void *data);
+        RC getSUM(void *data);
+        RC getAVG(void *data);
+
     };
 } // namespace PeterDB
 
