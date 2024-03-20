@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <limits>
+#include <unordered_map>
 
 #include "rm.h"
 #include "ix.h"
@@ -232,6 +233,12 @@ namespace PeterDB {
         void *lhsTuple;
         void *rhsTuple;
         bool first;
+
+        std::unordered_map<Value, std::vector<Value>> *dups = {};
+        std::vector<void*> pages;
+
+        RC loadLeftBlock();
+
     };
 
     class INLJoin : public Iterator {

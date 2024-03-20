@@ -117,6 +117,18 @@ namespace PeterDB {
         return SUCCESS;
     }
 
+    RC joinAttrs(const std::vector<Attribute> &lhs, const std::vector<Attribute> &rhs, std::vector<Attribute> &attrs) {
+        for (int i = 0; i < lhs.size(); i++) {
+            attrs.push_back(lhs[i]);
+        }
+        for (int i = 0; i < rhs.size(); i++) {
+            attrs.push_back(rhs[i]);
+        }
+        return SUCCESS;
+    }
+
+    RC concatTuples(const std::vector<Attribute> &lhsAttrs, const std::vector<Attribute> &rhsAttrs, const void *lhsTuple, const void *rhsTuple, void *data){};
+
     Filter::Filter(Iterator *input, const Condition &condition) : iter(input) {
         // just in case
         recordDescriptor.clear();
@@ -146,9 +158,9 @@ namespace PeterDB {
     RC Filter::getNextTuple(void *data) {
         while(iter->getNextTuple(data) != QE_EOF) {
             rbfm->readAttributeFromRecord(recordDescriptor, attrName, data, val);
-                if (compareAttrs(op, type, val, condition)) {
-                    return SUCCESS;
-                }
+            if (compareAttrs(op, type, val, condition)) {
+                return SUCCESS;
+            }
         }
         return FAILURE;
     }
@@ -242,16 +254,56 @@ namespace PeterDB {
     }
 
     BNLJoin::~BNLJoin() {
+        pages.clear();
+        dups->clear();
         free(lhsTuple);
         free(rhsTuple);
     }
 
     RC BNLJoin::getNextTuple(void *data) {
-        return -1;
+        if (first == true && (rhsIter->getNextTuple(rhsTuple) == QE_EOF || loadLeftBlock() == QE_EOF)) {
+            return QE_EOF;
+        }
+
+        if (pages.size() == 0) { return FAILURE; }
+
+        bool cont = true;
+        int lit = 0;
+        do {
+            if (lit == pages.size()) {
+                if (rhsIter->getNextTuple(rhsTuple) == QE_EOF) {
+                    if (loadLeftBlock() == QE_EOF) {
+                        return FAILURE;
+                    } else {
+                        rhsIter->setIterator();
+                        rhsIter->getNextTuple(rhsTuple);
+                    }
+                }
+                lit = 0;
+            }
+            lit++;
+            lhsTuple = pages[lit];
+        } while (cont);
     }
 
     RC BNLJoin::getAttributes(std::vector<Attribute> &attrs) const {
-        return -1;
+        return joinAttrs(lhsAttrs, rhsAttrs, attrs);
+    }
+
+    RC BNLJoin::loadLeftBlock() {
+        pages.clear();
+        memset(lhsTuple, 0, PAGE_SIZE);
+
+        if (lhsIter->getNextTuple(lhsTuple) == QE_EOF) {
+            free(lhsTuple);
+            return QE_EOF;
+        }
+
+        for (int i = 0; i < numPages; i++) {
+            void *page = malloc(PAGE_SIZE);
+            lhsIter->getNextTuple(page);
+            pages.push_back(page);
+        }
     }
 
     INLJoin::INLJoin(Iterator *leftIn, IndexScan *rightIn, const Condition &condition) : lhsIter(leftIn), rhsIter(rightIn) {
@@ -272,11 +324,21 @@ namespace PeterDB {
     }
 
     RC INLJoin::getNextTuple(void *data) {
+        if (rhsIter->getNextTuple(rhsTuple) != QE_EOF) {
+            // return tuple
+            concatTuples(lhsAttrs, rhsAttrs, lhsTuple, rhsTuple, data);
+            return SUCCESS;
+        }
+        do {
+            if (rhsIter->getNextTuple(rhsTuple) == QE_EOF) { return QE_EOF; }
 
+            //setScan(lhsTuple);
+        } while (lhsIter->getNextTuple(lhsTuple) != QE_EOF);
+        concatTuples(lhsAttrs, rhsAttrs, lhsTuple, rhsTuple, data);
     }
 
     RC INLJoin::getAttributes(std::vector<Attribute> &attrs) const {
-
+        return joinAttrs(lhsAttrs, rhsAttrs, attrs);
     }
 
     GHJoin::GHJoin(Iterator *leftIn, Iterator *rightIn, const Condition &condition, const unsigned int numPartitions) {

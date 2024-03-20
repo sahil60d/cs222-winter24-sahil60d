@@ -319,6 +319,8 @@ namespace PeterDB {
             tableDesc(attributes);
         } else if (tableName == columns) {
             columnDesc(attributes);
+        } else if (tableName == indices) {
+            indexDesc(attributes);
         } else {
             // create record description for all other tables
             createDesc(tableName, attributes);
@@ -697,6 +699,7 @@ namespace PeterDB {
 
         RID rid;
         std::vector<Attribute> indexRecordDescriptor;
+        indexDesc(indexRecordDescriptor);
         if (insertIndex(indexFileHandle, indexRecordDescriptor, rid, tableName, tableID, attributeName, attributePosition) == FAILURE) { return FAILURE; }
 
         rbfm->closeFile(indexFileHandle);
@@ -708,7 +711,7 @@ namespace PeterDB {
         Attribute attr = recordDescriptor[attributePosition];
         std::vector<std::string> attrNames;
         attrNames.push_back(attr.name);
-        scan(tableName, attr.name, NO_OP, NULL, attrNames, rmsi);
+        scan(tableName, attr.name, NO_OP, nullptr, attrNames, rmsi);
 
         void* page = malloc(PAGE_SIZE);
         RID indexRid;

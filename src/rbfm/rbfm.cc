@@ -531,9 +531,13 @@ namespace PeterDB {
 
         if (rbfm_ScanIterator.conditionAttributeType == TypeVarChar) {                   // get varchar value
             //int t = *((int*)value);
-            rbfm_ScanIterator.value = malloc(*((int*)value));                   // size of entire value, including length int
-            memset(rbfm_ScanIterator.value, 0, *((int*)value) + 1);
-            memcpy(rbfm_ScanIterator.value, (char*)value + sizeof(int), *((int*)value));     // copy value
+            rbfm_ScanIterator.value = malloc(
+                    *((int *) value));                   // size of entire value, including length int
+            memset(rbfm_ScanIterator.value, 0, *((int *) value) + 1);
+            memcpy(rbfm_ScanIterator.value, (char *) value + sizeof(int), *((int *) value));     // copy value
+        } else if (value == nullptr) {
+            rbfm_ScanIterator.value = nullptr;
+
         } else {               // type Int/Real
             rbfm_ScanIterator.value = malloc(sizeof(int));
             memcpy(rbfm_ScanIterator.value, value, sizeof(int));
